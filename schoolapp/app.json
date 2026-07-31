@@ -1,25 +1,33 @@
 {
   "expo": {
-    "platforms": ["ios", "android", "web"],
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
     "androidStatusBar": {
       "hidden": true,
       "translucent": true,
       "backgroundColor": "#ffffff"
     },
-    "name": "schoolapp",
+    "name": "육민관고등학교",
     "slug": "schoolapp",
     "scheme": "schoolapp",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "statusBarHidden": true,
       "bundleIdentifier": "com.ymk.schoolapp",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIStatusBarHidden": true
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.ymk.schoolapp"
+        ]
       }
     },
     "android": {
@@ -29,8 +37,7 @@
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
-      },
-      "edgeToEdgeEnabled": true
+      }
     },
     "web": {
       "output": "static",
@@ -51,7 +58,39 @@
           }
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-notifications",
+      [
+        "expo-widgets",
+        {
+          "groupIdentifier": "group.com.ymk.schoolapp",
+          "widgets": [
+            {
+              "name": "MealWidget",
+              "src": "./widgets/MealWidget.tsx",
+              "displayName": "오늘의 급식",
+              "description": "오늘 학교 급식 메뉴를 바로 확인합니다.",
+              "supportedFamilies": [
+                "systemSmall",
+                "systemMedium"
+              ]
+            },
+            {
+              "name": "TimetableWidget",
+              "src": "./widgets/TimetableWidget.tsx",
+              "displayName": "오늘의 시간표",
+              "description": "오늘 반 시간표 일정을 바로 확인합니다.",
+              "supportedFamilies": [
+                "systemSmall",
+                "systemMedium"
+              ]
+            }
+          ]
+        }
+      ],
+      "expo-font",
+      "expo-image",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true,
