@@ -11,7 +11,7 @@ import { useAdmin } from "../_layout";
 import { Ionicons } from '@expo/vector-icons'; 
 
 // 🎯 apple-targets용 위젯 스토리지
-import ExtensionStorage from '@bacons/apple-targets';
+import { ExtensionStorage } from '@bacons/apple-targets';
 
 const widgetStorage = new ExtensionStorage('group.com.ymk.schoolapp');
 

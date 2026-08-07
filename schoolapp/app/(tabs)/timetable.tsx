@@ -6,7 +6,7 @@ import { db, auth } from "../../firebaseConfig";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { Ionicons } from '@expo/vector-icons'; 
 // ✅ 수정: 동작하지 않던 expo-widgets(updateSnapshot) 대신 @bacons/apple-targets 사용
-import ExtensionStorage from '@bacons/apple-targets';
+import { ExtensionStorage } from '@bacons/apple-targets';
 
 const widgetStorage = new ExtensionStorage('group.com.ymk.schoolapp');
 
