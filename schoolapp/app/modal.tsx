@@ -10,8 +10,6 @@ export default function ModalScreen() {
       <Text style={styles.title}>이것은 모달입니다</Text>
       
       <TouchableOpacity 
-        // ✅ 'as any'를 붙이면 타입 체크를 강제로 통과합니다. 
-        // 혹은 router.back() 을 쓰면 모달이 닫히며 이전 화면으로 돌아갑니다.
         onPress={() => router.replace('/' as any)} 
         activeOpacity={0.7}
         style={styles.linkContainer}

@@ -72,7 +72,6 @@ export default function ReportListScreen() {
     });
   };
 
-  // ✅ 수정된 벌점 기록 함수: 유저가 겹치지 않도록 UID 검증 강화
   const recordUserPenalty = async (uid: string, name: string, studentId: string) => {
     if (!uid || uid === "unknown_uid") {
       console.error("유효하지 않은 UID입니다. 기록을 취소합니다.");
@@ -126,17 +125,13 @@ export default function ReportListScreen() {
               if (targetSnap.exists()) {
                 const data = targetSnap.data();
                 
-                // ✅ 학번/UID 필드명 매칭 강화 (다양한 케이스 대응)
                 const authorUid = data.authorUid || data.uid || data.userId || "unknown_uid";
                 const authorName = data.authorName || data.name || "이름 없음";
                 
-                // 학번 필드가 StudentId, studentId, authorStudentId 중 하나라도 있으면 가져옴
                 const studentId = data.StudentId || data.studentId || data.authorStudentId || "학번 정보 없음";
-
-                // 벌점 기록
+                
                 await recordUserPenalty(authorUid, authorName, studentId);
 
-                // 삭제 처리
                 if (isPost) {
                   await deleteDoc(doc(db, "posts", report.postId));
                   await updateDoc(doc(db, "reports", report.id), { status: 'resolved' });

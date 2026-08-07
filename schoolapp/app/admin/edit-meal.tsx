@@ -18,7 +18,6 @@ export default function EditMealScreen() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
 
-  // 🎨 요청하신 컬러 설정 반영
   const theme = {
     bg: isDark ? '#121212' : '#F8F9FA',
     card: isDark ? '#1E1E1E' : '#fff',
@@ -29,9 +28,7 @@ export default function EditMealScreen() {
     headerBg: isDark ? '#1E1E1E' : '#fff',
     badge: isDark ? '#333' : '#E9ECEF',
     guide: isDark ? '#1E1E1E' : '#F1F3F5',
-    // 포인트 컬러: 라이트 556B2F / 다크 869489
     accent: isDark ? '#869489' : '#556B2F',
-    // 버튼 컬러: 82A977
     button: '#82A977',
   };
 

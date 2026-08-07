@@ -4,7 +4,7 @@ import {
   ActivityIndicator, useColorScheme, Platform 
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from "../../../firebaseConfig";
 import { collection, query, where, orderBy, getDocs } from "firebase/firestore";
@@ -53,7 +53,6 @@ export default function MySuggestionsScreen() {
       }
       const userData = JSON.parse(session);
 
-      // ✅ 본인의 studentId와 일치하는 문서만 쿼리
       const q = query(
         collection(db, "suggestions"),
         where("studentId", "==", userData.studentId),

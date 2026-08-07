@@ -4,12 +4,12 @@ import {
   ActivityIndicator, Alert, Platform, useColorScheme 
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import { db, auth } from "../../../firebaseConfig";
 import { doc, getDoc, deleteDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { useAdmin } from "../../_layout";
-import { Ionicons } from '@expo/vector-icons'; // ✅ 아이콘 추가
+import { Ionicons } from '@expo/vector-icons'; 
 
 export default function NoticeDetailScreen() {
   const router = useRouter();
@@ -20,7 +20,7 @@ export default function NoticeDetailScreen() {
   
   const [notice, setNotice] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [isBookmarked, setIsBookmarked] = useState(false); // ✅ 북마크 상태 추가
+  const [isBookmarked, setIsBookmarked] = useState(false); 
 
   const theme = {
     bg: isDark ? '#121212' : '#F8F9FA',
@@ -30,10 +30,9 @@ export default function NoticeDetailScreen() {
     content: isDark ? '#E5E8EB' : '#4E5968',
     border: isDark ? '#2C2C2E' : '#F1F3F5',
     headerBg: isDark ? '#1E1E1E' : '#fff',
-    yellow: '#FFD700', // ✅ 북마크 색상
+    yellow: '#FFD700', 
   };
 
-  // ✅ 북마크 상태 확인
   const checkBookmarkStatus = async (uid: string) => {
     if (!uid || !id) return;
     try {
@@ -73,7 +72,6 @@ export default function NoticeDetailScreen() {
     if (auth.currentUser) checkBookmarkStatus(auth.currentUser.uid);
   }, [id]));
 
-  // ✅ 북마크 토글 함수
   const handleToggleBookmark = async () => {
     const currentUser = auth.currentUser;
     if (!currentUser) return Alert.alert("알림", "로그인이 필요합니다.");
@@ -124,6 +122,8 @@ export default function NoticeDetailScreen() {
     );
   }
 
+  const isAuthor = auth.currentUser && notice && auth.currentUser.uid === notice.authorUid;
+
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
       {/* 헤더 */}
@@ -133,7 +133,6 @@ export default function NoticeDetailScreen() {
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: theme.text }]}>공지사항</Text>
         
-        {/* ✅ 북마크 버튼 추가 */}
         <TouchableOpacity onPress={handleToggleBookmark} style={styles.bookmarkBtn}>
           <Ionicons 
             name={isBookmarked ? "bookmark" : "bookmark-outline"} 
@@ -169,7 +168,7 @@ export default function NoticeDetailScreen() {
           <Text style={[styles.content, { color: theme.content }]}>{notice?.content}</Text>
         </View>
 
-        {isAdmin && (
+        {isAdmin && isAuthor && (
           <View style={styles.adminActionRow}>
             <TouchableOpacity 
               style={[styles.actionBtn, styles.editBtn, isDark && { backgroundColor: '#82A977' }]}
@@ -206,7 +205,7 @@ const styles = StyleSheet.create({
   backBtn: { padding: 4 },
   backIcon: { fontSize: 22, fontWeight: '400' },
   headerTitle: { fontSize: 18, fontWeight: '700' },
-  bookmarkBtn: { padding: 4 }, // ✅ 북마크 버튼 스타일 추가
+  bookmarkBtn: { padding: 4 }, 
 
   scrollContent: { padding: 24, paddingBottom: 60 },
 

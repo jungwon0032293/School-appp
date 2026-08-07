@@ -4,7 +4,7 @@ import {
   Modal, Alert, ActivityIndicator, Keyboard, TouchableWithoutFeedback, 
   KeyboardAvoidingView, Platform, Switch, ScrollView, useColorScheme 
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import { useRouter } from 'expo-router'; 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from "../../../firebaseConfig";
@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { useAdmin } from "../../_layout";
 import axios from 'axios';
+import { Ionicons } from '@expo/vector-icons'; 
 
 interface Suggestion {
   id: string;
@@ -36,6 +37,7 @@ export default function SuggestionScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
+  const [notices, setNotices] = useState<any[]>([]); 
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -65,17 +67,25 @@ export default function SuggestionScreen() {
     accent: '#82A977'
   };
 
+  useEffect(() => {
+    let isMounted = true;
+    if (isMounted) {
+      loadData();
+    }
+    return () => { isMounted = false; };
+  }, [showOnlyUnanswered]);
+
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [showOnlyUnanswered])
+    }, [])
   );
 
   const loadData = async () => {
+    if (loading) return; 
     setLoading(true);
     try {
       let q;
-      // ✅ 학생회이면서 미답변 필터가 켜진 경우에만 필터 쿼리 실행
       if (isAdmin && showOnlyUnanswered) {
         q = query(
           collection(db, "suggestions"), 
@@ -88,7 +98,7 @@ export default function SuggestionScreen() {
       
       const querySnapshot = await getDocs(q);
       const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Suggestion));
-      setSuggestions(data);
+      setSuggestions([...data]);
     } catch (e) {
       console.error(e);
       Alert.alert("오류", "데이터를 불러오지 못했습니다.");
@@ -131,17 +141,29 @@ export default function SuggestionScreen() {
     if (!title.trim() || !content.trim()) {
       return Alert.alert("알림", "제목과 내용을 모두 입력해주세요.");
     }
+    
     Keyboard.dismiss();
+    
+    const submittedTitle = title.trim();
+    const submittedContent = content.trim();
+    const submittedIsPrivate = isPrivate;
+    const submittedName = name;
+
+    setModalVisible(false);
+    setTitle(''); 
+    setContent(''); 
+    setIsPrivate(false);
+
     try {
       const myToken = await AsyncStorage.getItem('pushToken');
       const newSuggestionRef = await addDoc(collection(db, "suggestions"), {
         uid: user.uid,
         studentId: studentId,
-        name: name,
-        title: title.trim(),
-        content: content.trim(),
+        name: submittedName,
+        title: submittedTitle,
+        content: submittedContent,
         status: '검토중',
-        isPrivate,
+        isPrivate: submittedIsPrivate,
         likes: [],
         pushToken: myToken || "",
         createdAt: serverTimestamp(),
@@ -159,8 +181,8 @@ export default function SuggestionScreen() {
             targetUid: adminDoc.id,
             type: 'suggestion',
             postTitle: '새로운 건의사항',
-            senderName: name,
-            content: `"${title.trim()}" 건의가 접수되었습니다.`,
+            senderName: submittedName,
+            content: `"${submittedTitle}" 건의가 접수되었습니다.`,
             isRead: false,
             postId: newSuggestionRef.id,
             createdAt: serverTimestamp(),
@@ -172,19 +194,19 @@ export default function SuggestionScreen() {
                 to: adminData.pushToken,
                 sound: 'default',
                 title: "📩 새로운 건의사항 접수",
-                body: `${name}님의 새로운 건의가 등록되었습니다.`,
+                body: `${submittedName}님의 새로운 건의가 등록되었습니다.`,
                 data: { screen: 'suggestion', id: newSuggestionRef.id },
               });
             } catch (err) { console.error("학생회 푸시 실패:", err); }
           }
         }
       }
-
-      setTitle(''); setContent(''); setIsPrivate(false);
-      setModalVisible(false);
+      
+      Alert.alert("성공", "건의사항이 정상적으로 등록되었습니다.");
       loadData();
-      Alert.alert("성공", "건의사항이 접수되었습니다.");
-    } catch (e) { Alert.alert("오류", "저장 실패"); }
+    } catch (e) { 
+      Alert.alert("오류", "저장 실패"); 
+    }
   };
 
   const handleAdminSubmit = async () => {
@@ -284,18 +306,24 @@ export default function SuggestionScreen() {
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
       <View style={[styles.container, { backgroundColor: theme.background }]}>
+        
         <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
-          <View>
-            <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>건의함</Text>
-            {/* ✅ 학생회 계정(isAdmin)인 경우에만 미답변 필터링 UI 노출 */}
-            {isAdmin && (
-               <TouchableOpacity onPress={() => setShowOnlyUnanswered(!showOnlyUnanswered)} style={{ marginTop: 4 }}>
-                  <Text style={{ color: showOnlyUnanswered ? theme.accent : theme.textSecondary, fontSize: 12, fontWeight: '700' }}>
-                    {showOnlyUnanswered ? "● 미답변 건의만 보는 중" : "○ 전체 건의 보는 중"}
-                  </Text>
-               </TouchableOpacity>
-            )}
+          <View style={styles.headerLeft}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.navButton}>
+              <Ionicons name="chevron-back" size={24} color={theme.textPrimary} />
+            </TouchableOpacity>
+            <View style={styles.titleContainer}>
+              <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>건의함</Text>
+              {isAdmin && (
+                 <TouchableOpacity onPress={() => setShowOnlyUnanswered(!showOnlyUnanswered)} style={{ marginTop: 2 }}>
+                    <Text style={{ color: showOnlyUnanswered ? theme.accent : theme.textSecondary, fontSize: 11, fontWeight: '700' }}>
+                      {showOnlyUnanswered ? "● 미답변 필터" : "○ 전체 보기"}
+                    </Text>
+                 </TouchableOpacity>
+              )}
+            </View>
           </View>
+
           <View style={styles.headerBtns}>
             <TouchableOpacity style={styles.myBtn} onPress={() => router.push('/suggestion/my-suggestions' as any)}>
               <Text style={styles.myBtnText}>나의 건의</Text>
@@ -306,10 +334,10 @@ export default function SuggestionScreen() {
           </View>
         </View>
 
-        {loading ? <ActivityIndicator size="large" color={theme.accent} style={{ flex: 1 }} /> : (
+        {loading && suggestions.length === 0 ? <ActivityIndicator size="large" color={theme.accent} style={{ flex: 1 }} /> : (
           <FlatList 
             data={suggestions} 
-            keyExtractor={(item) => item.id} 
+            keyExtractor={(item, index) => item.id ? String(item.id) : `fallback-${index}`} 
             renderItem={renderItem} 
             contentContainerStyle={styles.listPadding} 
             showsVerticalScrollIndicator={false}
@@ -336,7 +364,7 @@ export default function SuggestionScreen() {
                     <TextInput style={[styles.modalInputSmall, { flex: 1, marginRight: 8, borderBottomColor: theme.border, color: theme.textSecondary, opacity: 0.6 }]} value={studentId} editable={false} />
                     <TextInput style={[styles.modalInputSmall, { flex: 1, borderBottomColor: theme.border, color: theme.textSecondary, opacity: 0.6 }]} value={name} editable={false} />
                   </View>
-                  <TextInput style={[styles.modalInputTitle, { borderBottomColor: theme.border, color: theme.textPrimary }]} placeholder="제목" placeholderTextColor={theme.textSecondary} value={title} onChangeText={setTitle} />
+                  <TextInput style={[styles.modalInputTitle, { borderBottomWidth: 1, borderBottomColor: theme.border, color: theme.textPrimary }]} placeholder="제목" placeholderTextColor={theme.textSecondary} value={title} onChangeText={setTitle} />
                   <TextInput style={[styles.modalInputContent, { color: theme.textPrimary }]} placeholder="내용을 입력해주세요." placeholderTextColor={theme.textSecondary} multiline value={content} onChangeText={setContent} />
                   <View style={[styles.privateRow, { borderTopColor: theme.border }]}>
                     <Text style={[styles.privateLabel, { color: theme.textSecondary }]}>비공개 제출</Text>
@@ -378,8 +406,19 @@ export default function SuggestionScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingTop: Platform.OS === 'ios' ? 60 : 20, paddingHorizontal: 24, paddingBottom: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1 },
-  headerTitle: { fontSize: 24, fontWeight: '800' },
+  header: { 
+    paddingTop: Platform.OS === 'ios' ? 55 : 15, 
+    paddingHorizontal: 20, 
+    paddingBottom: 20, 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    borderBottomWidth: 1 
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center' },
+  navButton: { padding: 4, marginLeft: -8, marginRight: 4 },
+  titleContainer: { flexDirection: 'column' },
+  headerTitle: { fontSize: 22, fontWeight: '800' },
   headerBtns: { flexDirection: 'row', gap: 8 },
   myBtn: { backgroundColor: '#F1F3F5', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, borderWidth: 1, borderColor: '#E9ECEF', justifyContent: 'center', alignItems: 'center' },
   myBtnText: { color: '#4E5968', fontWeight: '700', fontSize: 14, textAlign: 'center' },

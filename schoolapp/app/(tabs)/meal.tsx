@@ -4,11 +4,16 @@ import {
   ActivityIndicator, Platform, Dimensions, useColorScheme 
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import { db } from "../../firebaseConfig";
 import { doc, getDoc } from "firebase/firestore";
 import { useAdmin } from "../_layout";
 import { Ionicons } from '@expo/vector-icons'; 
+
+// 🎯 apple-targets용 위젯 스토리지
+import ExtensionStorage from '@bacons/apple-targets';
+
+const widgetStorage = new ExtensionStorage('group.com.ymk.schoolapp');
 
 const { width } = Dimensions.get('window');
 
@@ -31,7 +36,6 @@ export default function MealScreen() {
   const [selectedDate, setSelectedDate] = useState("");
   const [weekDates, setWeekDates] = useState<string[]>([]);
 
-  // 🎨 요청하신 컬러 설정 반영
   const theme = {
     bg: isDark ? '#121212' : '#F8F9FA',
     card: isDark ? '#1E1E1E' : '#fff',
@@ -40,17 +44,17 @@ export default function MealScreen() {
     content: isDark ? '#E5E8EB' : '#4E5968',
     btn: isDark ? '#2C2C2C' : '#F1F3F5',
     border: isDark ? '#2C2C2C' : '#F1F3F5',
-    // 포인트 컬러: 라이트 556B2F / 다크 869489
     accent: isDark ? '#869489' : '#556B2F',
-    // 버튼 컬러: 82A977
     button: '#82A977',
     badgeLunch: isDark ? 'rgba(134, 148, 137, 0.15)' : 'rgba(85, 107, 47, 0.1)',
     badgeDinner: isDark ? 'rgba(255, 184, 0, 0.15)' : '#FFF9E6',
   };
 
   const formatDate = (date: Date) => {
-    const d = new Date(date.getTime() + (9 * 60 * 60 * 1000));
-    return d.toISOString().split('T')[0];
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   };
 
   useEffect(() => {
@@ -107,6 +111,30 @@ export default function MealScreen() {
     }
   };
 
+  // 🎯 수정된 위젯 데이터 전달 함수
+  const updateWidgetData = (date: string, data: any) => {
+    if (!data) return;
+
+    try {
+      const lunchText = data.lunch && data.lunch.length > 0 
+        ? data.lunch.join("\n") 
+        : "점심 급식 정보가 없습니다.";
+        
+      const dinnerText = data.dinner && data.dinner.length > 0 
+        ? `\n\n[석식]\n${data.dinner.join("\n")}` 
+        : "";
+
+      const month = date.split('-')[1];
+      const day = date.split('-')[2];
+
+      widgetStorage.set('mealType', `${parseInt(month)}월 ${parseInt(day)}일 급식`);
+      widgetStorage.set('mealList', `${lunchText}${dinnerText}`);
+      ExtensionStorage.reloadWidget();
+    } catch (e) {
+      console.error("위젯 업데이트 중 오류 발생:", e);
+    }
+  };
+
   const loadMeal = async (date: string) => {
     if (!date) return;
     setLoading(true);
@@ -114,10 +142,13 @@ export default function MealScreen() {
       const docRef = doc(db, "meals", date);
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
-        setMealData(docSnap.data());
+        const data = docSnap.data();
+        setMealData(data);
+        updateWidgetData(date, data);
       } else {
         const neisData = await fetchNeisMeal(date);
         setMealData(neisData);
+        updateWidgetData(date, neisData);
       }
     } catch (e) {
       console.error(e);
@@ -133,6 +164,7 @@ export default function MealScreen() {
   );
 
   const getDayName = (dateStr: string) => {
+    if (!dateStr) return "";
     const days = ['일', '월', '화', '수', '목', '금', '토'];
     return days[new Date(dateStr).getDay()];
   };
@@ -142,9 +174,14 @@ export default function MealScreen() {
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
       <View style={[styles.header, { backgroundColor: theme.card }]}>
-        <View>
-          <Text style={[styles.monthText, { color: theme.subText }]}>{parseInt(currentMonth)}월</Text>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>오늘의 급식</Text>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.navButton}>
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
+          </TouchableOpacity>
+          <View style={styles.titleContainer}>
+            <Text style={[styles.monthText, { color: theme.subText }]}>{parseInt(currentMonth)}월</Text>
+            <Text style={[styles.headerTitle, { color: theme.text }]}>오늘의 급식</Text>
+          </View>
         </View>
         {isAdmin && (
           <TouchableOpacity 
@@ -155,7 +192,6 @@ export default function MealScreen() {
           </TouchableOpacity>
         )}
       </View>
-
       <View style={[styles.dateSelectorContainer, { backgroundColor: theme.card }]}>
         <View style={styles.weekNavigation}>
           <TouchableOpacity onPress={() => changeWeek(-1)} style={styles.navBtn}>
@@ -186,7 +222,6 @@ export default function MealScreen() {
           </TouchableOpacity>
         </View>
       </View>
-
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {loading ? (
           <ActivityIndicator size="large" color={theme.accent} style={{ marginTop: 50 }} />
@@ -233,13 +268,16 @@ export default function MealScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { 
-    paddingTop: Platform.OS === 'ios' ? 60 : 20, 
-    paddingHorizontal: 24, 
+    paddingTop: Platform.OS === 'ios' ? 55 : 15, 
+    paddingHorizontal: 20, 
     paddingBottom: 10,
     flexDirection: 'row', 
     justifyContent: 'space-between', 
     alignItems: 'flex-end',
   },
+  headerLeft: { flexDirection: 'row', alignItems: 'center' },
+  navButton: { padding: 4, marginLeft: -8, marginRight: 4, marginBottom: -2 },
+  titleContainer: { flexDirection: 'column' },
   monthText: { fontSize: 14, fontWeight: '700', marginBottom: 2 },
   headerTitle: { fontSize: 24, fontWeight: '800' },
   editBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, marginBottom: 4 },

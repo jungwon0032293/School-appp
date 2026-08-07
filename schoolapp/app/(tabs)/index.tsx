@@ -1,17 +1,20 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   View, Text, StyleSheet, TouchableOpacity, ScrollView, 
-  Dimensions, ActivityIndicator, Alert, Platform, useColorScheme 
+  Dimensions, ActivityIndicator, Alert, Platform, useColorScheme,
+  Modal, TextInput 
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import PagerView from 'react-native-pager-view';
 import { db, auth } from "../../firebaseConfig";
 import { 
-  doc, getDoc, collection, query, orderBy, getDocs, where, updateDoc 
+  doc, getDoc, collection, query, orderBy, getDocs, where, updateDoc,
+  writeBatch 
 } from "firebase/firestore";
 import { useAdmin } from "../_layout";
 import { Ionicons } from '@expo/vector-icons'; 
+import AsyncStorage from '@react-native-async-storage/async-storage'; 
 
 const { width } = Dimensions.get('window');
 
@@ -25,6 +28,9 @@ export default function HomeScreen() {
   const [banners, setBanners] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
+
+  const [newStudentId, setNewStudentId] = useState("");
+  const [updateLoading, setUpdateLoading] = useState(false);
 
   const accentColor = isDark ? '#869489' : '#556B2F';
   const buttonColor = '#82A977';
@@ -59,7 +65,6 @@ export default function HomeScreen() {
       );
       
       const snap = await getDocs(q);
-      
       if (snap.empty) return;
 
       for (const reportDoc of snap.docs) {
@@ -88,6 +93,19 @@ export default function HomeScreen() {
     setLoading(true);
     const todayDate = getKSTDate();
     try {
+      const targetStudentId = user?.studentId;
+      if (targetStudentId) {
+        const userDocRef = doc(db, "users", targetStudentId);
+        const userSnap = await getDoc(userDocRef);
+        
+        if (userSnap.exists()) {
+          const remoteData = userSnap.data();
+          const mergedUser = { ...user, ...remoteData };
+          await AsyncStorage.setItem('userSession', JSON.stringify(mergedUser));
+          setUser(mergedUser);
+        }
+      }
+
       const mealSnap = await getDoc(doc(db, "meals", todayDate));
       if (mealSnap.exists()) setTodayMeal(mealSnap.data());
 
@@ -107,7 +125,7 @@ export default function HomeScreen() {
 
   useFocusEffect(useCallback(() => { 
     loadHomeData(); 
-  }, [user])); 
+  }, [])); 
 
   const handleSignOut = () => {
     Alert.alert("로그아웃", "로그아웃 하시겠습니까?", [
@@ -118,6 +136,72 @@ export default function HomeScreen() {
         Alert.alert("알림", "로그아웃 되었습니다.");
       }}
     ]);
+  };
+
+  const handleUserYearlyUpdate = async () => {
+    if (!newStudentId || newStudentId.length < 4) {
+      return Alert.alert("알림", "올바른 새 학번을 입력해 주세요.");
+    }
+    if (!user?.studentId) return;
+
+    setUpdateLoading(true);
+    try {
+      const oldStudentId = user.studentId;
+      const usersRef = collection(db, "users");
+
+      const duplicateQuery = query(
+        usersRef,
+        where("isGraduated", "==", false),
+        where("schoolNum", "==", newStudentId),
+        where("isSchoolNumUpdated", "==", true)
+      );
+      const duplicateSnap = await getDocs(duplicateQuery);
+
+      const isDuplicate = duplicateSnap.docs.some(doc => doc.id !== user.uid);
+      if (isDuplicate) {
+        setUpdateLoading(false);
+        return Alert.alert("변경 실패", "이미 다른 학생이 등록 완료한 학번입니다. 반/번호를 다시 확인해 주세요.");
+      }
+
+      const batch = writeBatch(db);
+      const oldRef = doc(db, "users", oldStudentId);
+      const newFormatRef = doc(db, "users", newStudentId);
+      const oldSnap = await getDoc(oldRef);
+
+      if (oldSnap.exists()) {
+        const currentData = oldSnap.data();
+
+        batch.set(newFormatRef, {
+          ...currentData,
+          studentId: newStudentId, 
+          schoolNum: newStudentId, 
+          needsUpdate: false,
+          isSchoolNumUpdated: true, 
+          isApproved: true 
+        });
+
+        batch.delete(oldRef);
+        await batch.commit();
+
+        const updatedUserInfo = { 
+          ...user, 
+          studentId: newStudentId, 
+          schoolNum: newStudentId, 
+          needsUpdate: false, 
+          isSchoolNumUpdated: true 
+        };
+        await AsyncStorage.setItem('userSession', JSON.stringify(updatedUserInfo));
+        setUser(updatedUserInfo);
+
+        Alert.alert("성공", "새 학년도 학번으로 정상 업데이트되었습니다!");
+        setNewStudentId("");
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert("오류", "학번 변경 처리 중 문제가 발생했습니다.");
+    } finally {
+      setUpdateLoading(false);
+    }
   };
 
   return (
@@ -140,40 +224,35 @@ export default function HomeScreen() {
               )}
             </View>
             <Text style={[styles.welcomeText, { color: isDark ? '#9CA3AF' : '#6B7684' }]}>
-              {user ? `${user.name}님, 반갑습니다!` : "Welcome to YMK High School!"}
+              {user ? `${user.name}님, 반갑습니다!` : "로그인이 필요합니다."}
             </Text>
           </View>
         </View>
 
         <View style={styles.headerRight}>
-          {/* ✅ 알림 버튼: 로그인 상태일 때만 노출 */}
           {user && (
-            <TouchableOpacity 
-              style={styles.headerIconBtn} 
-              onPress={() => router.push('/notifications' as any)}
-            >
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/notifications' as any)}>
               <Ionicons name="notifications-outline" size={24} color={isDark ? '#FFFFFF' : '#4E5968'} />
             </TouchableOpacity>
           )}
-
-          {/* ✅ 설정 버튼: 로그인 상태일 때만 노출 */}
           {user && (
-            <TouchableOpacity 
-              style={styles.headerIconBtn} 
-              onPress={() => router.push('/settings' as any)}
-            >
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/settings' as any)}>
               <Ionicons name="settings-outline" size={24} color={isDark ? '#FFFFFF' : '#4E5968'} />
             </TouchableOpacity>
           )}
           
-          {/* ✅ 로그인/로그아웃 버튼: 아이콘 스타일로 수정 */}
           <TouchableOpacity 
-            style={styles.headerIconBtn} 
+            style={user ? styles.headerIconBtn : styles.loginTextBtn} 
             onPress={user ? handleSignOut : () => router.push("/admin/login")}
           >
+            {!user && (
+              <Text style={[styles.loginLabelText, { color: isDark ? '#FFFFFF' : '#4E5968' }]}>
+                로그인
+              </Text>
+            )}
             <Ionicons 
               name={user ? "log-out-outline" : "log-in-outline"} 
-              size={24} 
+              size={22} 
               color={user ? (isDark ? '#FF6B6B' : '#E03131') : (isDark ? '#FFFFFF' : '#4E5968')} 
             />
           </TouchableOpacity>
@@ -249,6 +328,40 @@ export default function HomeScreen() {
       </View>
 
       <View style={{ height: 60 }} />
+
+      <Modal visible={!!user?.needsUpdate} transparent={true} animationType="slide">
+        <View style={styles.updateModalOverlay}>
+          <View style={[styles.updateModalContent, { backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF' }]}>
+            <Text style={[styles.updateModalTitle, { color: isDark ? '#FFFFFF' : '#1A1F27' }]}>📢 신년도 학번 갱신 안내</Text>
+            <Text style={[styles.updateModalDesc, { color: isDark ? '#A0A0A0' : '#4E5968' }]}>
+              새 학년도 시작에 맞춰 정보 업데이트가 필요합니다.{"\n"}올해 새로 교부받은 반/번호 정보를 기준으로 새 학번을 입력해 주세요.
+            </Text>
+            
+            <TextInput 
+              style={[styles.updateInput, { backgroundColor: isDark ? '#2D2D2D' : '#F2F4F6', color: isDark ? '#FFFFFF' : '#1A1F27' }]}
+              placeholder="새 학번 입력 (예: 20512)" 
+              placeholderTextColor="#888"
+              value={newStudentId}
+              onChangeText={setNewStudentId}
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+
+            <TouchableOpacity 
+              style={[styles.updateSubmitBtn, { backgroundColor: buttonColor }]}
+              onPress={handleUserYearlyUpdate}
+              disabled={updateLoading}
+            >
+              {updateLoading ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.updateSubmitBtnText}>학번 정보 변경 완료</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </ScrollView>
   );
 }
@@ -274,6 +387,10 @@ const styles = StyleSheet.create({
   headerLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   headerRight: { flexDirection: 'row', gap: 8, alignItems: 'center' }, 
   headerIconBtn: { padding: 4, justifyContent: 'center', alignItems: 'center' },
+  
+  loginTextBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.03)' },
+  loginLabelText: { fontSize: 13, fontWeight: '700', letterSpacing: -0.3 },
+
   logoCircle: { width: 42, height: 42, borderRadius: 14, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center', elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5 },
   logoEmoji: { fontSize: 22 },
   headerTextContainer: { marginLeft: 12 },
@@ -301,4 +418,12 @@ const styles = StyleSheet.create({
   adminCompactEmoji: { fontSize: 16, marginRight: 10 },
   adminCompactTitle: { fontSize: 14, fontWeight: '700', flex: 1 },
   adminCompactArrow: { fontSize: 14, fontWeight: '800' },
+  
+  updateModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', padding: 24 },
+  updateModalContent: { padding: 24, borderRadius: 28, gap: 16, elevation: 5, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 15 },
+  updateModalTitle: { fontSize: 20, fontWeight: '800' },
+  updateModalDesc: { fontSize: 14, lineHeight: 22, fontWeight: '500' },
+  updateInput: { height: 55, borderRadius: 14, paddingHorizontal: 18, fontSize: 16, fontWeight: '600', marginTop: 4 },
+  updateSubmitBtn: { height: 52, borderRadius: 14, justifyContent: 'center', alignItems: 'center', marginTop: 4 },
+  updateSubmitBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' }
 });

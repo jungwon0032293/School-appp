@@ -11,9 +11,9 @@ import { useRouter } from 'expo-router';
 interface PenalizedUser {
   id: string;
   name: string;
-  studentId?: string;    // 소문자 대응
-  StudentId?: string;    // 대문자 대응
-  authorStudentId?: string; // 게시글 저장 필드 대응
+  studentId?: string;    
+  StudentId?: string;    
+  authorStudentId?: string; 
   count: number;
 }
 
@@ -25,7 +25,6 @@ export default function PenalizedUserListScreen() {
   const isDark = colorScheme === 'dark';
 
   useEffect(() => {
-    // 횟수가 많은 순서대로 정렬하여 실시간 감시
     const q = query(collection(db, "penalized_users"), orderBy("count", "desc"));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -48,7 +47,6 @@ export default function PenalizedUserListScreen() {
   const renderUser = ({ item }: { item: PenalizedUser }) => {
     const isWarning = item.count >= 5;
     
-    // ✅ 어떤 필드명으로 저장되어 있든 학번을 가져오도록 처리
     const displayStudentId = item.studentId || item.StudentId || item.authorStudentId || "학번 정보 없음";
 
     return (
@@ -124,7 +122,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', padding: 18, 
     borderRadius: 16, marginBottom: 12, borderWidth: 1.5,
     justifyContent: 'space-between',
-    // 그림자 효과 (선택사항)
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,

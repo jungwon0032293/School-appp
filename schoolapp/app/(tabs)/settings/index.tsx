@@ -84,7 +84,7 @@ export default function SettingsScreen() {
   };
 
   const confirmRoleChange = async () => {
-    if (targetRole === 'admin' && passwordInput === "ymk1234") {
+    if (targetRole === 'admin' && passwordInput === "dbralsrhks2026") {
       await processRoleUpdate('admin');
     } 
     else if (targetRole === 'master' && passwordInput === "dbrrhgkrtodghl2026") {
@@ -121,7 +121,6 @@ export default function SettingsScreen() {
     }
   };
 
-  // ✅ 회원 탈퇴 로직 추가
   const handleDeleteAccount = () => {
     Alert.alert(
       "회원 탈퇴",
@@ -139,13 +138,8 @@ export default function SettingsScreen() {
                 return;
               }
 
-              // 1. Firestore 데이터 삭제 (user.uid 기준)
               await deleteDoc(doc(db, "users", user.uid));
-
-              // 2. Firebase Auth 계정 삭제
               await deleteUser(currentUser);
-
-              // 3. 로컬 세션 및 전역 상태 초기화
               await AsyncStorage.removeItem('userSession');
               setUser(null);
               setIsAdmin(false);
@@ -184,18 +178,51 @@ export default function SettingsScreen() {
     </View>
   );
 
+  const SettingLinkItem = ({ title, onPress, icon, color }: any) => (
+    <TouchableOpacity 
+      style={[styles.settingItem, { backgroundColor: theme.card, borderBottomColor: theme.border }]}
+      onPress={onPress}
+    >
+      <View style={styles.settingLabel}>
+        <View style={[styles.iconBox, { backgroundColor: color + '20' }]}>
+          <Ionicons name={icon} size={20} color={color} />
+        </View>
+        <Text style={[styles.settingTitle, { color: theme.text }]}>{title}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={theme.subText} />
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <Text style={[styles.headerTitle, { color: theme.text }]}>설정</Text>
-        </View>
+      <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={24} color={theme.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>설정</Text>
+        <View style={styles.headerRightPlaceholder} />
+      </View>
 
+      <ScrollView showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>일반 알림</Text>
         <SettingItem title="좋아요 알림" value={settings.likeNoti} onToggle={() => toggleSetting('likeNoti')} icon="heart" color="#FF4D4D" />
         <SettingItem title="댓글 알림" value={settings.commentNoti} onToggle={() => toggleSetting('commentNoti')} icon="chatbubble" color="#3182F6" />
         <SettingItem title="건의 답변 알림" value={settings.suggestionNoti} onToggle={() => toggleSetting('suggestionNoti')} icon="mail" color="#FF9500" />
         <SettingItem title="주요 공지사항 알림" value={settings.majorSuggestionNoti} onToggle={() => toggleSetting('majorSuggestionNoti')} icon="star" color="#FACC15" />
+
+        <Text style={styles.sectionTitle}>사용자 보호 및 사생활</Text>
+        <SettingLinkItem 
+          title="차단 사용자 관리" 
+          icon="shield-alert" 
+          color="#6B7684" 
+          onPress={() => router.push('../../settings/blocked')} 
+        />
+        <SettingLinkItem 
+          title="숨김 콘텐츠 관리" 
+          icon="eye-off" 
+          color="#4E5968" 
+          onPress={() => router.push('../../settings/hidden')} 
+        />
 
         {isAdmin && (
           <>
@@ -203,6 +230,18 @@ export default function SettingsScreen() {
             <SettingItem title="새 건의 등록 알림" value={settings.newSuggestionNoti} onToggle={() => toggleSetting('newSuggestionNoti')} icon="document-text" color="#82A977" />
             <SettingItem title="회원가입 신청 알림" value={settings.newJoinRequestNoti} onToggle={() => toggleSetting('newJoinRequestNoti')} icon="person-add" color="#6366F1" />
             <SettingItem title="커뮤니티 신고 알림" value={settings.reportNoti} onToggle={() => toggleSetting('reportNoti')} icon="alert-circle" color="#FF4D4D" />
+          </>
+        )}
+
+        {isMaster && (
+          <>
+            <Text style={[styles.sectionTitle, { color: '#E03131' }]}>관리자 전용 제어</Text>
+            <SettingLinkItem 
+              title="신년도 학번 일괄 갱신 관리" 
+              icon="calendar-outline" 
+              color="#E03131" 
+              onPress={() => router.push('../../settings/yearly-update' as any)} 
+            />
           </>
         )}
 
@@ -228,7 +267,6 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* ✅ 탈퇴 버튼 추가 */}
         <View style={styles.footer}>
           <TouchableOpacity style={styles.deleteAccountBtn} onPress={handleDeleteAccount}>
             <Text style={styles.deleteAccountText}>회원 탈퇴</Text>
@@ -271,14 +309,24 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { padding: 24, paddingTop: 20 },
-  headerTitle: { fontSize: 28, fontWeight: '800' },
+  header: { 
+    height: 56, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 16,
+    borderBottomWidth: 1 
+  },
+  backBtn: { padding: 4, width: 32 },
+  headerTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  headerRightPlaceholder: { width: 32 }, 
+  
   sectionTitle: { fontSize: 13, fontWeight: '700', color: '#82A977', marginLeft: 24, marginTop: 25, marginBottom: 10, textTransform: 'uppercase' },
   settingItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 20, borderBottomWidth: 0.5 },
   settingLabel: { flexDirection: 'row', alignItems: 'center' },
   iconBox: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   settingTitle: { fontSize: 16, fontWeight: '600' },
-  roleContainer: { flexDirection: 'row', marginHorizontal: 20, padding: 6, borderRadius: 15, gap: 6 },
+  roleContainer: { flexDirection: 'row', marginHorizontal: 20, padding: 6, borderRadius: 15, gap: 6, marginTop: 5 },
   roleButton: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 10 },
   roleText: { fontSize: 14, fontWeight: '700', color: '#8E8E93' },
   footer: { marginTop: 40, alignItems: 'center', paddingBottom: 20 },

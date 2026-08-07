@@ -1,11 +1,18 @@
 import { View, Text, StyleSheet, TextInput, ScrollView, Platform, useColorScheme, TouchableOpacity, Alert } from 'react-native';
 import { useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router'; 
+import { db, auth } from "../../firebaseConfig";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { Ionicons } from '@expo/vector-icons'; 
+// ✅ 수정: 동작하지 않던 expo-widgets(updateSnapshot) 대신 @bacons/apple-targets 사용
+import ExtensionStorage from '@bacons/apple-targets';
+
+const widgetStorage = new ExtensionStorage('group.com.ymk.schoolapp');
 
 const DAYS = ['월', '화', '수', '목', '금'];
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];
 
-// 설정값
 const NEIS_API_KEY = 'f49e0037c5e94b30b6a2ec8d1c8f4c3a'; 
 const ATPT_CODE = 'K10'; 
 const SCHUL_CODE = '7801172'; 
@@ -18,10 +25,12 @@ interface TimetableData {
 }
 
 export default function TimetableScreen() {
+  const router = useRouter();
   const [timetable, setTimetable] = useState<TimetableData>({});
   const [grade, setGrade] = useState('');
   const [classNm, setClassNm] = useState('');
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false); 
 
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -31,27 +40,140 @@ export default function TimetableScreen() {
     card: isDark ? '#1E1E1E' : '#fff',
     text: isDark ? '#FFFFFF' : '#191F28',
     subText: isDark ? '#A0A0A0' : '#8B95A1',
-    border: isDark ? '#2C2C2C' : '#F1F3F5',
-    inputBg: isDark ? '#2C2C2C' : '#F8F9FA',
+    border: isDark ? '#2C2C2E' : '#F1F3F5',
+    inputBg: isDark ? '#2C2C2E' : '#F8F9FA',
     inputText: isDark ? '#E5E8EB' : '#4E5968',
     placeholder: isDark ? '#555' : '#ADB5BD',
     accent: isDark? '#869489' : '#556B2F'
   };
 
-  useEffect(() => { loadInitialData(); }, []);
+  useEffect(() => { 
+    loadInitialData(); 
+  }, []);
+
+  // 하드코딩된 날짜 대신, 오늘 기준 이번 주 월~금 날짜를 YYYYMMDD로 동적 계산
+  const getCurrentWeekDates = (): string[] => {
+    const today = new Date();
+    const day = today.getDay(); // 0: 일, 1: 월, ..., 6: 토
+    const diffToMonday = day === 0 ? 1 : day === 6 ? 2 : 1 - day;
+
+    const monday = new Date(today);
+    monday.setDate(today.getDate() + diffToMonday);
+
+    const dates: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      dates.push(`${y}${m}${dd}`);
+    }
+    return dates;
+  };
+
+  // ✅ 수정: widgetStorage.set()으로 값 저장 후 ExtensionStorage.reloadWidget()으로 위젯 새로고침
+  const updateWidgetTimetable = (currentTable: TimetableData, currentGrade: string, currentClass: string) => {
+    try {
+      const dayIndex = new Date().getDay();
+      
+      const targetDay = (dayIndex >= 1 && dayIndex <= 5) ? DAYS[dayIndex - 1] : '월';
+      
+      const lines: string[] = [];
+      PERIODS.forEach(period => {
+        const cell = currentTable[`${targetDay}-${period}`];
+        if (cell && cell.subject.trim()) {
+          const roomInfo = cell.room.trim() ? ` (${cell.room.trim()})` : '';
+          lines.push(`${period}교시: ${cell.subject.trim()}${roomInfo}`);
+        }
+      });
+
+      const resultString = lines.length > 0 ? lines.join('\n') : '오늘 등록된\n시간표가 없습니다.';
+      const headerTitle = currentGrade && currentClass ? `육민관고 ${currentGrade}-${currentClass}` : '오늘의 시간표';
+
+      widgetStorage.set('gradeClass', headerTitle);
+      widgetStorage.set('timetableList', resultString);
+      ExtensionStorage.reloadWidget();
+    } catch (e) {
+      console.error("위젯 업데이트 중 오류 발생:", e);
+    }
+  };
 
   const loadInitialData = async () => {
     const savedTable = await AsyncStorage.getItem('TIMETABLE');
     const savedGrade = await AsyncStorage.getItem('MY_GRADE');
     const savedClass = await AsyncStorage.getItem('MY_CLASS');
-    if (savedTable) setTimetable(JSON.parse(savedTable));
-    if (savedGrade) setGrade(savedGrade);
-    if (savedClass) setClassNm(savedClass);
+    
+    let activeTable = savedTable ? JSON.parse(savedTable) : {};
+    let activeGrade = savedGrade || '';
+    let activeClass = savedClass || '';
+
+    if (savedTable) setTimetable(activeTable);
+    if (savedGrade) setGrade(activeGrade);
+    if (savedClass) setClassNm(activeClass);
+
+    const currentUserUid = auth.currentUser?.uid;
+    if (currentUserUid) {
+      try {
+        const userRef = doc(db, "users", currentUserUid);
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists()) {
+          const serverData = userSnap.data();
+          if (serverData.timetable) {
+            activeTable = serverData.timetable;
+            setTimetable(activeTable);
+            await AsyncStorage.setItem('TIMETABLE', JSON.stringify(serverData.timetable));
+          }
+          if (serverData.grade) {
+            activeGrade = serverData.grade;
+            setGrade(activeGrade);
+            await AsyncStorage.setItem('MY_GRADE', serverData.grade);
+          }
+          if (serverData.classNm) {
+            activeClass = serverData.classNm;
+            setClassNm(activeClass);
+            await AsyncStorage.setItem('MY_CLASS', serverData.classNm);
+          }
+        }
+      } catch (e) {
+        console.error("서버 데이터 로드 실패:", e);
+      }
+    }
+
+    updateWidgetTimetable(activeTable, activeGrade, activeClass);
+  };
+
+  const syncTimetableToCloud = async () => {
+    const currentUserUid = auth.currentUser?.uid;
+    if (!currentUserUid) {
+      Alert.alert("인증 필요", "로그인한 사용자만 계정 연동을 사용할 수 있습니다.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const userRef = doc(db, "users", currentUserUid);
+      await setDoc(userRef, {
+        timetable: timetable,
+        grade: grade.trim(),
+        classNm: classNm.trim(),
+        timetableUpdatedAt: new Date()
+      }, { merge: true });
+
+      Alert.alert("연동 완료", "시간표가 계정에 저장되었습니다. 다른 기기에서도 로그인 시 자동 연동됩니다.");
+    } catch (e) {
+      console.error(e);
+      Alert.alert("오류", "클라우드 저장 도중 문제가 발생했습니다.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const saveTimetable = async (newTable: TimetableData) => {
     setTimetable(newTable);
     await AsyncStorage.setItem('TIMETABLE', JSON.stringify(newTable));
+    updateWidgetTimetable(newTable, grade, classNm);
   };
 
   const fetchNeisTimetable = async () => {
@@ -62,11 +184,12 @@ export default function TimetableScreen() {
 
     setLoading(true);
     try {
-      let newTable: TimetableData = {};
-      const testDates = ["20260309", "20260310", "20260311", "20260312", "20260313"];
+      let newTable: TimetableData = { ...timetable };
+      const weekDates = getCurrentWeekDates();
+      let receivedAny = false;
 
-      for (let i = 0; i < testDates.length; i++) {
-        const date = testDates[i];
+      for (let i = 0; i < weekDates.length; i++) {
+        const date = weekDates[i];
         const dayName = DAYS[i];
 
         const url = `https://open.neis.go.kr/hub/hisTimetable?KEY=${NEIS_API_KEY}&Type=json&ATPT_OFCDC_SC_CODE=${ATPT_CODE}&SD_SCHUL_CODE=${SCHUL_CODE}&ALL_TI_YMD=${date}&GRADE=${grade}&CLASS_NM=${classNm}`;
@@ -79,16 +202,22 @@ export default function TimetableScreen() {
           rows.forEach((row: any) => {
             newTable[`${dayName}-${row.PERIO}`] = {
               subject: row.ITRT_CNTNT,
-              room: '' // 교실 정보는 수동 입력을 위해 비워둠
+              room: newTable[`${dayName}-${row.PERIO}`]?.room ?? ''
             };
           });
+          receivedAny = true;
         }
+      }
+
+      if (!receivedAny) {
+        Alert.alert('알림', '이번 주 시간표 정보를 찾을 수 없어요. 학년/반을 다시 확인해주세요.');
+        return;
       }
 
       await saveTimetable(newTable);
       await AsyncStorage.setItem('MY_GRADE', grade);
       await AsyncStorage.setItem('MY_CLASS', classNm);
-      Alert.alert('성공', `${grade}학년 ${classNm}반 시간표로 업데이트되었습니다.`);
+      Alert.alert('성공', `${grade}학년 ${classNm}반 시간표로 업데이트되었습니다.\n(클라우드에 연동하려면 오른쪽 위 저장 버튼을 눌러주세요)`);
       
     } catch (error: any) {
       Alert.alert('오류', '데이터를 가져오는 중 문제가 발생했습니다.');
@@ -111,7 +240,21 @@ export default function TimetableScreen() {
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
       <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>나의 시간표</Text>
+        <View style={styles.topNavRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.navButton}>
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>나의 시간표</Text>
+          <TouchableOpacity 
+            onPress={syncTimetableToCloud} 
+            disabled={uploading}
+            style={[styles.cloudSyncBtn, { backgroundColor: theme.accent, opacity: uploading ? 0.6 : 1 }]}
+          >
+            <Ionicons name="cloud-upload-outline" size={14} color="#fff" style={{ marginRight: 4 }} />
+            <Text style={styles.cloudSyncBtnText}>{uploading ? '저장 중' : '계정 연동'}</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.setupRow}>
           <TextInput 
             style={[styles.smallInput, { backgroundColor: theme.inputBg, color: theme.inputText }]}
@@ -198,7 +341,7 @@ export default function TimetableScreen() {
             💡 2·3학년 공통과목 외 <Text style={{fontWeight: '800', color: theme.accent}}>선택과목 시간표</Text>는 직접 입력해주세요.
           </Text>
           <Text style={[styles.subInfoText, { color: theme.placeholder, marginTop: 4 }]}>
-            입력한 내용은 기기 내에 자동으로 저장됩니다.
+            기기에 자동 저장되며, 상단 [계정 연동] 버튼 클릭 시 실시간 동기화됩니다.
           </Text>
         </View>
       </ScrollView>
@@ -208,11 +351,15 @@ export default function TimetableScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingTop: Platform.OS === 'ios' ? 60 : 20, paddingHorizontal: 20, paddingBottom: 20, borderBottomWidth: 1 },
-  headerTitle: { fontSize: 24, fontWeight: '800', marginBottom: 15 },
+  header: { paddingTop: Platform.OS === 'ios' ? 55 : 15, paddingHorizontal: 20, paddingBottom: 20, borderBottomWidth: 1 },
+  topNavRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 15 },
+  navButton: { padding: 4, marginLeft: -8 },
+  headerTitle: { fontSize: 22, fontWeight: '800', flex: 1, marginLeft: 6 },
+  cloudSyncBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 15 },
+  cloudSyncBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   setupRow: { flexDirection: 'row', gap: 8 },
   smallInput: { width: 60, height: 44, borderRadius: 12, textAlign: 'center', fontWeight: '600', fontSize: 16 },
-  syncButton: { flex: 1, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center', backgroundColor : '#64748B' },
+  syncButton: { flex: 1, height: 44, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
   syncButtonText: { color: '#fff', fontWeight: '700' },
   content: { flex: 1 },
   scrollContent: { padding: 12, paddingBottom: 40 },

@@ -1,23 +1,24 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   View, Text, FlatList, TouchableOpacity, StyleSheet, TextInput, 
   Alert, ActivityIndicator, useColorScheme, Platform, 
-  SafeAreaView, Modal, TouchableWithoutFeedback, Dimensions,
+  SafeAreaView, Animated, TouchableWithoutFeedback, Dimensions,
   ScrollView
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db, auth } from "../../../firebaseConfig"; 
 import { 
   collection, query, where, orderBy, getDocs, deleteDoc, doc, writeBatch,
-  setDoc, getDoc, addDoc, serverTimestamp
+  setDoc, getDoc, serverTimestamp, onSnapshot
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth"; 
 import { useAdmin } from "../../_layout";
 import { Ionicons } from '@expo/vector-icons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
 
 interface Post {
   id: string;
@@ -32,7 +33,7 @@ interface Post {
   views?: number;
   commentCount?: number;
   likeCount?: number;
-  reportCount: number; // 실시간 계산용
+  reportCount: number; 
 }
 
 export default function CommunityScreen() {
@@ -45,11 +46,13 @@ export default function CommunityScreen() {
   const [loading, setLoading] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('전체');
   const [searchQuery, setSearchQuery] = useState('');
-  // '인기글' 카테고리 기본값에 추가
   const [categories, setCategories] = useState(['전체', '인기글', '북마크', '1학년', '2학년', '3학년', '자유']);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false); 
   const [reportCount, setReportCount] = useState(0); 
   const [bookmarks, setBookmarks] = useState<string[]>([]); 
+  const [hiddenPostIds, setHiddenPostIds] = useState<string[]>([]); 
+
+  const drawerTranslateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
 
   const theme = {
     background: isDark ? '#111111' : '#F8F9FA',
@@ -60,7 +63,46 @@ export default function CommunityScreen() {
     border: isDark ? '#2C2C2E' : '#E9ECEF',
     accent: '#82A977',
     red: '#FF4D4D',
-    yellow: '#FFD700'
+    yellow: '#FFD700',
+    writerBg: isDark ? '#2C2C2E' : '#E8F5E9', 
+    writerText: '#82A977' 
+  };
+
+  const toggleDrawer = (open: boolean) => {
+    if (open) {
+      setIsDrawerOpen(true);
+      Animated.timing(drawerTranslateX, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(drawerTranslateX, {
+        toValue: -DRAWER_WIDTH,
+        duration: 220,
+        useNativeDriver: true,
+      }).start(() => setIsDrawerOpen(false));
+    }
+  };
+
+  const syncHiddenPostsFromDB = () => {
+    const activeUid = auth.currentUser?.uid;
+    if (!activeUid) {
+      setHiddenPostIds([]);
+      return () => {};
+    }
+
+    const userRef = doc(db, "users", activeUid);
+    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const userData = docSnap.data();
+        setHiddenPostIds(userData.hiddenPosts || []);
+      }
+    }, (err) => {
+      console.error("숨김 게시글 계정 동기화 실패:", err);
+    });
+
+    return unsubscribe;
   };
 
   const loadBookmarks = async () => {
@@ -75,14 +117,27 @@ export default function CommunityScreen() {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) loadBookmarks();
+    let unsubscribeHidden: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        loadBookmarks();
+        if (unsubscribeHidden) unsubscribeHidden();
+        unsubscribeHidden = syncHiddenPostsFromDB(); 
+      } else {
+        setBookmarks([]);
+        setHiddenPostIds([]);
+        if (unsubscribeHidden) {
+          unsubscribeHidden();
+          unsubscribeHidden = undefined;
+        }
+      }
     });
+
     const loadCategories = async () => {
       const saved = await AsyncStorage.getItem('community_categories');
       if (saved) {
         const parsed = JSON.parse(saved);
-        // 저장된 카테고리에 '인기글'과 '북마크'가 없으면 순서대로 삽입
         if (!parsed.includes('인기글')) parsed.splice(1, 0, '인기글');
         if (!parsed.includes('북마크')) {
             const hotIndex = parsed.indexOf('인기글');
@@ -92,7 +147,11 @@ export default function CommunityScreen() {
       }
     };
     loadCategories();
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeHidden) unsubscribeHidden();
+    };
   }, []);
 
   const checkReports = async () => {
@@ -109,16 +168,24 @@ export default function CommunityScreen() {
       loadPosts();
       checkReports();
       loadBookmarks(); 
-    }, [selectedCategory, isMaster])
+    }, [selectedCategory, isMaster, hiddenPostIds]) 
   );
 
   const loadPosts = async () => {
     setLoading(true);
     try {
-      // 1. 게시글 가져오기
+      let currentHiddenIds = [...hiddenPostIds];
+      
+      const activeUid = auth.currentUser?.uid;
+      if (activeUid) {
+        const userSnap = await getDoc(doc(db, "users", activeUid));
+        if (userSnap.exists()) {
+          currentHiddenIds = userSnap.data().hiddenPosts || [];
+        }
+      }
+
       let q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
       
-      // '전체', '북마크', '인기글'이 아닐 때만 카테고리 쿼리 적용
       if (selectedCategory !== '전체' && selectedCategory !== '북마크' && selectedCategory !== '인기글') {
         q = query(q, where("category", "==", selectedCategory));
       }
@@ -132,7 +199,6 @@ export default function CommunityScreen() {
         likeCount: doc.data().likeCount || 0,
       } as Post));
 
-      // 2. 신고 내역 가져와서 개수 계산
       const reportsSnapshot = await getDocs(collection(db, "reports"));
       const reportMap: { [key: string]: number } = {};
       reportsSnapshot.docs.forEach(d => {
@@ -140,16 +206,16 @@ export default function CommunityScreen() {
         if (pId) reportMap[pId] = (reportMap[pId] || 0) + 1;
       });
 
-      // 3. 신고수 주입 및 필터링
       const processed = allPosts.map(p => ({
         ...p,
         reportCount: reportMap[p.id] || 0
       })).filter(p => {
-        // --- 인기글 필터링 기준 설정 ---
+        if (currentHiddenIds.includes(String(p.id))) return false;
+
         if (selectedCategory === '인기글') {
-          const HOT_LIKE_STANDARD = 3;    // 인기글 좋아요 기준
-          const HOT_VIEW_STANDARD = 50;   // 인기글 조회수 기준
-          const HOT_COMMENT_STANDARD = 5; // 인기글 댓글수 기준
+          const HOT_LIKE_STANDARD = 3;    
+          const HOT_VIEW_STANDARD = 50;   
+          const HOT_COMMENT_STANDARD = 5; 
 
           const isHot = (p.likeCount || 0) >= HOT_LIKE_STANDARD || 
                         (p.views || 0) >= HOT_VIEW_STANDARD || 
@@ -157,11 +223,9 @@ export default function CommunityScreen() {
           
           if (!isHot) return false;
         }
-        // ----------------------------
 
         if (selectedCategory === '북마크' && !bookmarks.includes(p.id)) return false;
         
-        // 신고 5개 이상일 때 필터링
         const isHidden = p.reportCount >= 5; 
         if (isHidden) {
           return isMaster === true; 
@@ -190,9 +254,6 @@ export default function CommunityScreen() {
       if (bookmarks.includes(postId)) {
         await deleteDoc(bookmarkRef);
         setBookmarks(prev => prev.filter(id => id !== postId));
-        if (selectedCategory === '북마크') {
-          setPosts(prev => prev.filter(p => p.id !== postId));
-        }
       } else {
         await setDoc(bookmarkRef, {
           uid: currentUser.uid,
@@ -244,7 +305,7 @@ export default function CommunityScreen() {
           setCategories(updatedCats);
           await AsyncStorage.setItem('community_categories', JSON.stringify(updatedCats));
           setSelectedCategory('전체');
-          setIsDrawerOpen(false);
+          toggleDrawer(false);
           loadPosts();
         } catch (e) { console.error(e); } finally { setLoading(false); }
       }}
@@ -263,6 +324,14 @@ export default function CommunityScreen() {
     const isBookmarked = bookmarks.includes(item.id);
     const isHiddenPost = item.reportCount >= 5; 
 
+    const formatDateTime = (timestamp: any) => {
+      if (!timestamp || !timestamp.toDate) return '';
+      const dateObj = timestamp.toDate();
+      const dateString = dateObj.toLocaleDateString();
+      const timeString = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return `${dateString} ${timeString}`;
+    };
+
     return (
       <TouchableOpacity 
         style={[
@@ -270,13 +339,14 @@ export default function CommunityScreen() {
           { backgroundColor: theme.card, borderColor: theme.border },
           isHiddenPost && { opacity: 0.5, borderStyle: 'dashed', borderColor: theme.red } 
         ]}
-        onPress={() => router.push(`/community/${item.id}`)}
+        onPress={() => router.push(`/community/${item.id}` as any)}
         onLongPress={() => handleDelete(item.id)}
       >
         <View style={styles.postHeader}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={[styles.categoryLabel, { color: theme.accent }]}>{item.category}</Text>
             <Text style={[styles.authorText, { color: theme.subText }]}>{displayAuthor}</Text>
+            
             {isHiddenPost && isMaster && (
               <View style={{ backgroundColor: theme.red, paddingHorizontal: 6, borderRadius: 4 }}>
                 <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>신고 누적 숨김됨</Text>
@@ -309,8 +379,9 @@ export default function CommunityScreen() {
                <Text style={[styles.statText, { color: theme.accent }]}>{item.likeCount}</Text>
              </View>
            </View>
+           
            <Text style={[styles.dateText, { color: theme.subText }]}>
-             {item.createdAt?.toDate ? item.createdAt.toDate().toLocaleDateString() : ''}
+             {formatDateTime(item.createdAt)}
            </Text>
         </View>
       </TouchableOpacity>
@@ -319,9 +390,14 @@ export default function CommunityScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* 헤더 영역 */}
       <View style={[styles.header, { backgroundColor: theme.header, borderBottomColor: theme.border }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <TouchableOpacity onPress={() => setIsDrawerOpen(true)} style={styles.menuBtn}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => toggleDrawer(true)} style={styles.menuBtn}>
             <Text style={[styles.menuIcon, { color: theme.text }]}>☰</Text>
           </TouchableOpacity>
           {isAdmin && (
@@ -340,10 +416,43 @@ export default function CommunityScreen() {
         </TouchableOpacity>
       </View>
 
-      <Modal visible={isDrawerOpen} transparent animationType="fade" onRequestClose={() => setIsDrawerOpen(false)}>
+      <View style={styles.searchBarContainer}>
+        <TextInput 
+          style={[styles.searchBar, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
+          placeholder="게시글 검색..."
+          placeholderTextColor={theme.subText}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+      </View>
+
+      {loading ? (
+        <ActivityIndicator size="large" color={theme.accent} style={{ flex: 1 }} />
+      ) : (
+        <FlatList 
+          data={filteredPosts}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listPadding}
+          renderItem={renderPost}
+          ListEmptyComponent={<Text style={styles.emptyText}>{selectedCategory === '북마크' ? "북마크한 게시글이 없습니다." : "게시글이 없습니다."}</Text>}
+        />
+      )}
+
+      {isDrawerOpen && (
         <View style={styles.drawerOverlay}>
-          <TouchableWithoutFeedback onPress={() => setIsDrawerOpen(false)}><View style={styles.drawerCloseArea} /></TouchableWithoutFeedback>
-          <View style={[styles.drawerContent, { backgroundColor: theme.header }]}>
+          <TouchableWithoutFeedback onPress={() => toggleDrawer(false)}>
+            <View style={styles.drawerCloseArea} />
+          </TouchableWithoutFeedback>
+
+          <Animated.View 
+            style={[
+              styles.drawerContent, 
+              { 
+                backgroundColor: theme.header,
+                transform: [{ translateX: drawerTranslateX }]
+              }
+            ]}
+          >
             <SafeAreaView style={{ flex: 1 }}>
               <Text style={[styles.drawerTitle, { color: theme.text }]}>카테고리</Text>
               <ScrollView showsVerticalScrollIndicator={false}>
@@ -351,7 +460,7 @@ export default function CommunityScreen() {
                   <TouchableOpacity 
                     key={cat} 
                     style={[styles.categoryItem, selectedCategory === cat && { backgroundColor: theme.accent }]}
-                    onPress={() => { setSelectedCategory(cat); setIsDrawerOpen(false); }}
+                    onPress={() => { setSelectedCategory(cat); toggleDrawer(false); }}
                     onLongPress={() => isAdmin && handleDeleteCategory(cat)}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -378,12 +487,11 @@ export default function CommunityScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* 마스터 계정 전용: 제재 유저 관리 버튼 */}
                 {isMaster && (
                   <TouchableOpacity 
                     style={[styles.addCatBtn, { marginTop: 10, borderColor: theme.red }]} 
                     onPress={() => {
-                      setIsDrawerOpen(false);
+                      toggleDrawer(false);
                       router.push('/admin/penalized-users');
                     }}
                   >
@@ -392,30 +500,8 @@ export default function CommunityScreen() {
                 )}
               </ScrollView>
             </SafeAreaView>
-          </View>
+          </Animated.View>
         </View>
-      </Modal>
-
-      <View style={styles.searchBarContainer}>
-        <TextInput 
-          style={[styles.searchBar, { backgroundColor: theme.card, color: theme.text, borderColor: theme.border }]}
-          placeholder="게시글 검색..."
-          placeholderTextColor={theme.subText}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-
-      {loading ? (
-        <ActivityIndicator size="large" color={theme.accent} style={{ flex: 1 }} />
-      ) : (
-        <FlatList 
-          data={filteredPosts}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listPadding}
-          renderItem={renderPost}
-          ListEmptyComponent={<Text style={styles.emptyText}>{selectedCategory === '북마크' ? "북마크한 게시글이 없습니다." : "게시글이 없습니다."}</Text>}
-        />
       )}
     </SafeAreaView>
   );
@@ -425,15 +511,41 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { height: 60, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, borderBottomWidth: 1 },
   headerTitle: { fontSize: 18, fontWeight: '800' },
+  backBtn: { padding: 5, marginRight: 8 }, 
   menuBtn: { padding: 5 },
   menuIcon: { fontSize: 24 },
   reportBtn: { marginLeft: 15, padding: 5, position: 'relative' },
   reportBadge: { position: 'absolute', top: 5, right: 5, width: 8, height: 8, backgroundColor: '#FF4D4D', borderRadius: 4, borderWidth: 1, borderColor: '#fff' },
   writeBtn: { backgroundColor: '#82A977', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
   writeBtnText: { color: '#fff', fontWeight: '700' },
-  drawerOverlay: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.5)' },
-  drawerCloseArea: { flex: 1 },
-  drawerContent: { width: SCREEN_WIDTH * 0.75, height: '100%', padding: 25, borderTopRightRadius: 20, borderBottomRightRadius: 20 },
+  
+  drawerOverlay: { 
+  ...StyleSheet.absoluteFill,
+    flexDirection: 'row-reverse', 
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    zIndex: 9999
+  },
+  drawerContent: { 
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: DRAWER_WIDTH, 
+    height: '100%', 
+    padding: 25, 
+    borderTopRightRadius: 20, 
+    borderBottomRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 4, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 16
+  },
+  drawerCloseArea: { 
+    flex: 1, 
+    height: '100%',
+    backgroundColor: 'transparent'
+  },
   drawerTitle: { fontSize: 22, fontWeight: '800', marginBottom: 20, marginTop: Platform.OS === 'ios' ? 10 : 30 },
   categoryItem: { paddingVertical: 12, paddingHorizontal: 15, borderRadius: 10, marginBottom: 8 },
   categoryText: { fontSize: 16, fontWeight: '600' },

@@ -60,37 +60,10 @@
       ],
       "expo-web-browser",
       "expo-notifications",
-      [
-        "expo-widgets",
-        {
-          "groupIdentifier": "group.com.ymk.schoolapp",
-          "widgets": [
-            {
-              "name": "MealWidget",
-              "src": "./widgets/MealWidget.tsx",
-              "displayName": "오늘의 급식",
-              "description": "오늘 학교 급식 메뉴를 바로 확인합니다.",
-              "supportedFamilies": [
-                "systemSmall",
-                "systemMedium"
-              ]
-            },
-            {
-              "name": "TimetableWidget",
-              "src": "./widgets/TimetableWidget.tsx",
-              "displayName": "오늘의 시간표",
-              "description": "오늘 반 시간표 일정을 바로 확인합니다.",
-              "supportedFamilies": [
-                "systemSmall",
-                "systemMedium"
-              ]
-            }
-          ]
-        }
-      ],
       "expo-font",
       "expo-image",
-      "expo-status-bar"
+      "expo-status-bar",
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,

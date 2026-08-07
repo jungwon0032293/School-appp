@@ -5,7 +5,8 @@ import {
   Platform, ScrollView, useColorScheme, Dimensions
 } from 'react-native';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
+import { useRouter } from 'expo-router'; 
 import { db } from "../../firebaseConfig";
 import { collection, getDocs, query, addDoc, serverTimestamp, where, doc, updateDoc, deleteDoc, orderBy, writeBatch } from "firebase/firestore";
 import { useAdmin } from "../_layout";
@@ -31,6 +32,7 @@ interface Subject { id: string; name: string; grade: string; }
 interface Event { id: string; date: string; title: string; type: 'school' | 'personal' | 'subject'; userId?: string; subjectName?: string; grade?: string; isNotified?: boolean; }
 
 export default function CalendarScreen() {
+  const router = useRouter(); 
   const { isAdmin } = useAdmin();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -52,7 +54,6 @@ export default function CalendarScreen() {
   const [filterGradeTab, setFilterGradeTab] = useState('1');
   const [selectedFilterSubjects, setSelectedFilterSubjects] = useState<string[]>([]); 
   
-  // ✅ 알림 설정된 일정만 보기 상태 (추가)
   const [showOnlyNotified, setShowOnlyNotified] = useState(false);
 
   const themeColors = {
@@ -183,7 +184,6 @@ export default function CalendarScreen() {
     const marks: any = {};
     events.forEach(event => {
       if (event.type === 'subject' && (!event.subjectName || !selectedFilterSubjects.includes(event.subjectName))) return;
-      // ✅ 알림 일정 필터링 반영 (달력 점 표시)
       if (showOnlyNotified && !event.isNotified) return;
 
       if (!marks[event.date]) marks[event.date] = { dots: [] };
@@ -227,7 +227,6 @@ export default function CalendarScreen() {
     const hasPermission = isAdmin || (event.userId === deviceId);
     const options: any[] = [{ text: "닫기", style: "cancel" }];
     
-    // ✅ 알림 설정 토글 추가 (isNotified 필드 토글)
     options.unshift({ 
       text: event.isNotified ? "알림 해제" : "알림 설정", 
       onPress: async () => {
@@ -252,7 +251,6 @@ export default function CalendarScreen() {
     const todayStr = new Date().toISOString().split('T')[0];
     const baseEvents = isListView ? [...events].sort((a, b) => a.date.localeCompare(b.date)) : events.filter(e => e.date === selectedDate);
     
-    // ✅ 필터 로직: 과목 필터 + 알림 필터 통합
     const filtered = baseEvents.filter(event => {
       const subjectMatch = event.type === 'subject' ? (event.subjectName && selectedFilterSubjects.includes(event.subjectName)) : true;
       const notiMatch = showOnlyNotified ? event.isNotified === true : true;
@@ -317,8 +315,20 @@ export default function CalendarScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: themeColors.bg }]}>
+      
       <View style={[styles.header, { backgroundColor: themeColors.card, borderBottomColor: themeColors.border }]}>
-        <View style={{ flex: 1 }}><Text style={[styles.headerTitle, { color: themeColors.text }]}>일정 관리</Text><Text style={[styles.headerSubTitle, { color: themeColors.subText }]}>{showOnlyNotified ? "🔔 알림 설정된 일정" : (isListView ? "전체 일정" : "학년별 과목 및 나의 일정")}</Text></View>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.navButton}>
+            <Ionicons name="chevron-back" size={24} color={themeColors.text} />
+          </TouchableOpacity>
+          <View style={styles.titleContainer}>
+            <Text style={[styles.headerTitle, { color: themeColors.text }]}>일정 관리</Text>
+            <Text style={[styles.headerSubTitle, { color: themeColors.subText }]} numberOfLines={1}>
+              {showOnlyNotified ? "🔔 알림 설정된 일정" : (isListView ? "전체 일정" : "학년별 과목 및 나의 일정")}
+            </Text>
+          </View>
+        </View>
+
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: themeColors.inputBg }]} onPress={() => setFilterModalVisible(true)}>
             <Ionicons name="filter" size={18} color={selectedFilterSubjects.length === 0 && !showOnlyNotified ? themeColors.subText : '#82A977'} />
@@ -385,22 +395,14 @@ export default function CalendarScreen() {
         </View></View></TouchableWithoutFeedback>
       </Modal>
 
-      {/* ✅ 필터 모달 수정: 알림 설정 필터링 탭 추가 */}
       <Modal visible={filterModalVisible} animationType="slide" transparent><View style={styles.modalOverlay}><View style={[styles.modalView, { backgroundColor: themeColors.card, maxHeight: '80%', paddingHorizontal: 0 }]}>
         <Text style={[styles.modalTitle, { color: themeColors.text, paddingHorizontal: 26, marginBottom: 5 }]}>필터링 설정</Text>
         
-        {/* 알림 보기 모드 탭 */}
         <View style={[styles.typeSelector, { backgroundColor: themeColors.inputBg, marginVertical: 15 }]}>
-          <TouchableOpacity 
-            style={[styles.typeOpt, !showOnlyNotified && [styles.typeActive, {backgroundColor: themeColors.card}]]} 
-            onPress={() => setShowOnlyNotified(false)}
-          >
+          <TouchableOpacity style={[styles.typeOpt, !showOnlyNotified && [styles.typeActive, {backgroundColor: themeColors.card}]]} onPress={() => setShowOnlyNotified(false)}>
             <Text style={[styles.typeOptText, { color: !showOnlyNotified ? '#82A977' : themeColors.subText }]}>전체 보기</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.typeOpt, showOnlyNotified && [styles.typeActive, {backgroundColor: themeColors.card}]]} 
-            onPress={() => setShowOnlyNotified(true)}
-          >
+          <TouchableOpacity style={[styles.typeOpt, showOnlyNotified && [styles.typeActive, {backgroundColor: themeColors.card}]]} onPress={() => setShowOnlyNotified(true)}>
             <Text style={[styles.typeOptText, { color: showOnlyNotified ? '#82A977' : themeColors.subText }]}>🔔 알림 일정만</Text>
           </TouchableOpacity>
         </View>
@@ -417,9 +419,20 @@ export default function CalendarScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingTop: Platform.OS === 'ios' ? 60 : 20, paddingHorizontal: 24, paddingBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1 },
+  header: { 
+    paddingTop: Platform.OS === 'ios' ? 55 : 15, 
+    paddingHorizontal: 20, 
+    paddingBottom: 16, 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    borderBottomWidth: 1 
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center' },
+  navButton: { padding: 4, marginLeft: -8, marginRight: 4 },
+  titleContainer: { flexDirection: 'column', maxWidth: SCREEN_WIDTH * 0.45 }, // 가로 폭 확보 및 텍스트 말림 방지
   headerTitle: { fontSize: 22, fontWeight: '800' },
-  headerSubTitle: { fontSize: 12, marginTop: 2, fontWeight: '500' },
+  headerSubTitle: { fontSize: 11, marginTop: 2, fontWeight: '500' },
   iconBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
   iconText: { fontSize: 18, color: '#82A977' },
   addBtn: { height: 36, paddingHorizontal: 12, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },

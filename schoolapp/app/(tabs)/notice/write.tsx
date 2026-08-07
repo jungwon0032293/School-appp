@@ -5,7 +5,7 @@ import {
   Switch, ActivityIndicator, useColorScheme 
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { db } from "../../../firebaseConfig";
+import { db, auth } from "../../../firebaseConfig"; 
 import { doc, getDoc, collection, addDoc, serverTimestamp, updateDoc, getDocs } from "firebase/firestore";
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
@@ -62,7 +62,7 @@ export default function NoticeWriteScreen() {
     }
   };
 
-  const sendPushNotification = async (tokens: string[], noticeTitle: string) => {
+  const sendPushNotification = async (tokens: string[], noticeTitle: string, noticeId: string) => {
     if (tokens.length === 0) return;
     const uniqueTokens = Array.from(new Set(tokens)).filter(t => t.startsWith('ExponentPushToken'));
     const messages = uniqueTokens.map(token => ({
@@ -70,7 +70,7 @@ export default function NoticeWriteScreen() {
       sound: 'default',
       title: '📢 새로운 공지사항',
       body: noticeTitle,
-      data: { screen: 'notice' },
+      data: { screen: 'notice', id: noticeId }, 
     }));
 
     try {
@@ -105,26 +105,24 @@ export default function NoticeWriteScreen() {
       if (id) {
         await updateDoc(doc(db, "notices", id as string), noticeData);
       } else {
-        await addDoc(collection(db, "notices"), {
+        const docRef = await addDoc(collection(db, "notices"), {
           ...noticeData,
+          authorUid: auth.currentUser?.uid || null, 
           createdAt: serverTimestamp(),
         });
 
-        // ✅ 알림 설정 연동 로직
         const userDocs = await getDocs(collection(db, "users"));
         const pushTokens: string[] = [];
         
         userDocs.forEach(doc => {
           const data = doc.data();
-          // 사용자의 pushToken이 있고, 설정에서 majorSuggestionNoti가 true인 경우만 포함
-          // (설정값이 명시적으로 false가 아닐 때만 발송)
           if (data.pushToken && data.settings?.majorSuggestionNoti !== false) {
             pushTokens.push(data.pushToken);
           }
         });
 
         if (pushTokens.length > 0) {
-          await sendPushNotification(pushTokens, title.trim());
+          await sendPushNotification(pushTokens, title.trim(), docRef.id);
         }
       }
 

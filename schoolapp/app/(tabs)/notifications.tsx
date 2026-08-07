@@ -5,8 +5,7 @@ import {
 } from 'react-native';
 import { db, auth } from "../../firebaseConfig"; 
 import { 
-  collection, query, where, orderBy, onSnapshot, 
-  doc, updateDoc, writeBatch, Timestamp 
+  collection, query, onSnapshot, doc, updateDoc, writeBatch, Timestamp 
 } from "firebase/firestore"; 
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +19,7 @@ interface Notification {
   content: string;
   isRead: boolean;
   postId: string;
+  targetUid: string; 
   createdAt: Timestamp | any;
 }
 
@@ -41,31 +41,44 @@ export default function NotificationsScreen() {
     accent: '#82A977',
   };
 
+  const formatDateTime = (createdAt: any) => {
+    if (!createdAt) return "방금 전";
+    let dateObj: Date;
+    if (createdAt.toDate) dateObj = createdAt.toDate();
+    else if (createdAt.seconds) dateObj = new Date(createdAt.seconds * 1000);
+    else dateObj = new Date(createdAt);
+    if (isNaN(dateObj.getTime())) return "방금 전";
+    
+    const dateString = dateObj.toLocaleDateString();
+    const timeString = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `${dateString} ${timeString}`;
+  };
+
   useEffect(() => {
-    // auth.currentUser와 useAdmin의 user 중 확실한 것을 사용
     const currentUid = auth.currentUser?.uid || user?.uid;
     
     if (!currentUid) {
-      console.log("로그인된 사용자가 없습니다.");
       setLoading(false);
       return;
     }
 
-    // 💡 참고: orderBy가 포함된 쿼리는 Firestore 콘솔에서 '인덱스'를 생성해야 작동할 수 있습니다.
-    // 만약 목록이 아예 안 나온다면 orderBy를 잠시 지우고 테스트해보세요.
-    const q = query(
-      collection(db, "notifications"),
-      where("targetUid", "==", currentUid),
-      orderBy("createdAt", "desc")
-    );
+    const q = query(collection(db, "notifications"));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
+      const allData = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       } as Notification));
       
-      setNotifications(data);
+      const myNotis = allData.filter(noti => noti.targetUid === currentUid);
+
+      myNotis.sort((a, b) => {
+        const timeA = a.createdAt?.seconds || 0;
+        const timeB = b.createdAt?.seconds || 0;
+        return timeB - timeA;
+      });
+
+      setNotifications(myNotis);
       setLoading(false);
     }, (error) => {
       console.error("Firestore Listen Error:", error);
@@ -73,7 +86,7 @@ export default function NotificationsScreen() {
     });
 
     return () => unsubscribe();
-  }, [user?.uid]); // 의존성 배열 구체화
+  }, [user?.uid, auth.currentUser]);
 
   const handleNotificationPress = async (noti: Notification) => {
     try {
@@ -84,11 +97,8 @@ export default function NotificationsScreen() {
         router.push(`/notice/${noti.postId}` as any);
       } else if (noti.type === 'verify') {
         router.replace('/'); 
-      } else {
-        // postId가 없는 경우를 대비한 방어 코드
-        if (noti.postId) {
-          router.push(`/community/${noti.postId}`);
-        }
+      } else if (noti.postId) {
+        router.push(`/community/${noti.postId}`);
       }
     } catch (e) {
       console.error("알림 처리 오류:", e);
@@ -105,54 +115,6 @@ export default function NotificationsScreen() {
       batch.update(ref, { isRead: true });
     });
     await batch.commit();
-  };
-
-  const renderItem = ({ item }: { item: Notification }) => {
-    let iconName: any = 'megaphone';
-    let iconColor = theme.accent;
-
-    if (item.type === 'like') {
-      iconName = 'heart';
-      iconColor = '#FF4D4D';
-    } else if (item.type === 'comment') {
-      iconName = 'chatbubble';
-      iconColor = '#3182F6';
-    } else if (item.type === 'verify') {
-      iconName = 'person-add';
-      iconColor = '#82A977';
-    }
-
-    // 시간 표시 로직 보강
-    const displayTime = item.createdAt?.seconds 
-      ? new Date(item.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-      : "방금 전";
-
-    return (
-      <TouchableOpacity 
-        style={[
-          styles.notiCard, 
-          { backgroundColor: theme.card, borderBottomColor: theme.border },
-          !item.isRead && { backgroundColor: isDark ? '#1C251C' : '#F0F7F0' } 
-        ]}
-        onPress={() => handleNotificationPress(item)}
-      >
-        <View style={[styles.iconContainer, { backgroundColor: iconColor + '20' }]}>
-          <Ionicons name={iconName} size={20} color={iconColor} />
-        </View>
-        
-        <View style={styles.contentContainer}>
-          <Text style={[styles.notiTitle, { color: theme.text }]} numberOfLines={1}>
-            {item.postTitle || "알림"}
-          </Text>
-          <Text style={[styles.notiBody, { color: theme.subText }]} numberOfLines={2}>
-            <Text style={{ fontWeight: 'bold' }}>{item.senderName}</Text> {item.content}
-          </Text>
-          <Text style={styles.timeText}>{displayTime}</Text>
-        </View>
-
-        {!item.isRead && <View style={styles.unreadDot} />}
-      </TouchableOpacity>
-    );
   };
 
   return (
@@ -173,11 +135,52 @@ export default function NotificationsScreen() {
         <FlatList
           data={notifications}
           keyExtractor={(item) => item.id}
-          renderItem={renderItem}
+          renderItem={({ item }) => {
+            let iconName: any = 'megaphone';
+            let iconColor = theme.accent;
+
+            if (item.type === 'like') {
+              iconName = 'heart';
+              iconColor = '#FF4D4D';
+            } else if (item.type === 'comment') {
+              iconName = 'chatbubble';
+              iconColor = '#3182F6';
+            } else if (item.type === 'verify') {
+              iconName = 'person-add';
+              iconColor = '#82A977';
+            }
+
+            return (
+              <TouchableOpacity 
+                style={[
+                  styles.notiCard, 
+                  { backgroundColor: theme.card, borderBottomColor: theme.border },
+                  !item.isRead && { backgroundColor: isDark ? '#1C251C' : '#F0F7F0' } 
+                ]}
+                onPress={() => handleNotificationPress(item)}
+              >
+                <View style={[styles.iconContainer, { backgroundColor: iconColor + '20' }]}>
+                  <Ionicons name={iconName} size={20} color={iconColor} />
+                </View>
+                
+                <View style={styles.contentContainer}>
+                  <Text style={[styles.notiTitle, { color: theme.text }]} numberOfLines={1}>
+                    {item.postTitle || "게시글 알림"}
+                  </Text>
+                  <Text style={[styles.notiBody, { color: theme.subText }]} numberOfLines={2}>
+                    <Text style={{ fontWeight: 'bold' }}>{item.senderName}</Text> {item.content}
+                  </Text>
+                  <Text style={styles.timeText}>{formatDateTime(item.createdAt)}</Text>
+                </View>
+
+                {!item.isRead && <View style={styles.unreadDot} />}
+              </TouchableOpacity>
+            );
+          }}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Ionicons name="notifications-off-outline" size={50} color={theme.subText} />
-              <Text style={[styles.emptyText, { color: theme.subText }]}>알림이 없습니다.</Text>
+              <Text style={[styles.emptyText, { color: theme.subText }]}>새로운 알림이 없습니다.</Text>
             </View>
           }
         />

@@ -4,7 +4,7 @@ import {
   ActivityIndicator, Platform, useColorScheme, SafeAreaView 
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import { db, auth } from "../../../firebaseConfig"; 
 import { collection, query, where, getDocs, doc, getDoc, orderBy } from "firebase/firestore";
 import { Ionicons } from '@expo/vector-icons';
@@ -42,11 +42,10 @@ export default function BookmarkNoticeScreen() {
 
     setLoading(true);
     try {
-      // 1. 사용자의 북마크 중 'notice' 타입인 것들을 가져옴
       const q = query(
         collection(db, "bookmarks"), 
         where("uid", "==", user.uid),
-        where("type", "==", "notice") // 공지사항 타입만 필터링
+        where("type", "==", "notice") 
       );
       
       const bookmarkSnap = await getDocs(q);
@@ -58,7 +57,6 @@ export default function BookmarkNoticeScreen() {
         return;
       }
 
-      // 2. 해당 ID를 가진 실제 공지사항 데이터들을 가져옴
       const noticeList: Notice[] = [];
       for (const id of noticeIds) {
         const docRef = doc(db, "notices", id);
@@ -68,7 +66,6 @@ export default function BookmarkNoticeScreen() {
         }
       }
 
-      // 최신순 정렬
       noticeList.sort((a, b) => b.createdAt?.seconds - a.createdAt?.seconds);
       setBookmarkedNotices(noticeList);
     } catch (e) {

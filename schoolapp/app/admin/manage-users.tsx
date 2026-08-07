@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, Image, TouchableOpacity, 
-  Alert, ActivityIndicator, Modal, useColorScheme, Switch 
+  Alert, ActivityIndicator, Modal, useColorScheme 
 } from 'react-native';
 import { db } from "../../firebaseConfig";
 import { 
   collection, query, where, getDocs, doc, updateDoc, 
-  deleteDoc, getDoc, addDoc, serverTimestamp // ✅ addDoc, serverTimestamp 추가
+  deleteDoc, addDoc, serverTimestamp 
 } from "firebase/firestore";
 import { useAdmin } from "../_layout";
+import { useRouter } from 'expo-router'; 
 
 export default function ManageUsers() {
-  const { isAdmin, user, setUser } = useAdmin();
+  const router = useRouter(); 
+  const { isAdmin } = useAdmin();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
@@ -24,20 +26,7 @@ export default function ManageUsers() {
     card: isDark ? '#1E1E1E' : '#FFFFFF',
     text: isDark ? '#FFF' : '#1A1F27',
     subText: isDark ? '#A0A0A0' : '#4E5968',
-  };
-
-  const toggleNotify = async (value: boolean) => {
-    if (!user?.uid) return;
-    try {
-      const userRef = doc(db, "users", user.uid);
-      const currentSettings = user.settings || {};
-      const newSettings = { ...currentSettings, newJoinRequestNoti: value };
-      
-      await updateDoc(userRef, { settings: newSettings });
-      setUser({ ...user, settings: newSettings });
-    } catch (e) {
-      Alert.alert("오류", "설정 변경에 실패했습니다.");
-    }
+    accent: '#82A977' 
   };
 
   const sendPushNotification = async (expoPushToken: string, userName: string) => {
@@ -86,7 +75,6 @@ export default function ManageUsers() {
             role: userToApprove.role === "admin_pending" ? "admin" : "user"
           });
 
-          // ✅ 1. 알림 목록 데이터 생성 (verify 타입)
           await addDoc(collection(db, "notifications"), {
             targetUid: userToApprove.id,
             type: 'verify',
@@ -98,7 +86,6 @@ export default function ManageUsers() {
             createdAt: serverTimestamp(),
           });
 
-          // 2. 푸시 알림 전송
           if (userToApprove.pushToken) await sendPushNotification(userToApprove.pushToken, userToApprove.name);
           
           Alert.alert("완료", "승인되었습니다.");
@@ -128,16 +115,14 @@ export default function ManageUsers() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
+      <View style={styles.topNav}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={{ color: theme.accent, fontWeight: '700', fontSize: 15 }}>← 뒤로가기</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.header}>
         <Text style={[styles.title, { color: theme.text }]}>가입 승인 대기 목록</Text>
-        <View style={styles.settingRow}>
-          <Text style={[styles.settingText, { color: theme.subText }]}>신청 알림 받기</Text>
-          <Switch 
-            value={user?.settings?.newJoinRequestNoti ?? true} 
-            onValueChange={toggleNotify}
-            trackColor={{ false: "#767577", true: "#82A977" }}
-          />
-        </View>
       </View>
       
       {loading ? (
@@ -193,11 +178,10 @@ export default function ManageUsers() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, paddingTop: 60 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  container: { flex: 1, padding: 20, paddingTop: 50 },
+  topNav: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, paddingVertical: 5 }, 
+  header: { justifyContent: 'center', marginBottom: 20, paddingVertical: 4 }, // 레이아웃 정돈
   title: { fontSize: 20, fontWeight: '800' },
-  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  settingText: { fontSize: 13, fontWeight: '600' },
   userCard: { borderRadius: 20, padding: 15, marginBottom: 15, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10 },
   idCardPreview: { width: '100%', height: 180, borderRadius: 12, backgroundColor: '#f9f9f9', overflow: 'hidden' },
   zoomHint: { textAlign: 'center', fontSize: 12, color: '#888', marginTop: 8 },

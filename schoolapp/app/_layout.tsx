@@ -1,4 +1,4 @@
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { createContext, useContext, useState, useEffect, useRef } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StatusBar } from 'expo-status-bar'; 
@@ -14,20 +14,22 @@ import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebaseConfig";
 
+// Notifications 알림 핸들러 설정
 Notifications.setNotificationHandler({
   handleNotification: async (): Promise<any> => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
 });
 
-// ✅ AdminContext 인터페이스 확장: isMaster 추가
+// AdminContext 타입 정의
 interface AdminContextType {
   isAdmin: boolean;
   isMaster: boolean; 
   setIsAdmin: (val?: boolean, role?: string) => void;
-  setIsMaster: (val?: boolean, role?: string) => void; // 매개변수 타입 수정
+  setIsMaster: (val?: boolean, role?: string) => void;
   user: any;
   setUser: (user: any) => void;
 }
@@ -44,6 +46,7 @@ const AdminContext = createContext<AdminContextType>({
 export const useAdmin = () => useContext(AdminContext);
 
 export default function RootLayout() {
+  const router = useRouter();
   const [isAdmin, setIsAdmin] = useState(false);
   const [isMaster, setIsMaster] = useState(false); 
   const [user, setUser] = useState<any>(null); 
@@ -53,13 +56,18 @@ export default function RootLayout() {
 
   useEffect(() => {
     const initApp = async () => {
-      // 1. 일반 유저 세션 복구 및 권한 계산 (이름 정보가 포함된 세션)
+      // 1. 일반 유저 세션 복구 및 권한 계산
       const savedUser = await AsyncStorage.getItem('userSession');
-      await new Promise((resolve) => { const unsubscribe = onAuthStateChanged(auth, (u) => { unsubscribe(); resolve(u);
-      });});
+      await new Promise((resolve) => { 
+        const unsubscribe = onAuthStateChanged(auth, (u) => { 
+          unsubscribe(); 
+          resolve(u);
+        });
+      });
+
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
-        setUser(parsedUser); // 여기서 parsedUser.name이 들어감
+        setUser(parsedUser);
         
         const masterCheck = parsedUser.role === 'master';
         const adminCheck = parsedUser.isAdmin === true || parsedUser.role === 'admin';
@@ -67,14 +75,13 @@ export default function RootLayout() {
         setIsMaster(masterCheck);
         setIsAdmin(masterCheck || adminCheck);
       } else {
-        // 유저 세션이 없을 때만 기존 adminStatus 확인
         const status = await AsyncStorage.getItem('adminStatus');
         if (status === 'true') setIsAdmin(true);
       }
       
+      // ✅ 수정: NavigationBar.setBackgroundColorAsync 제거 (최신 expo-navigation-bar 호환)
       if (Platform.OS === 'android') {
         NavigationBar.setVisibilityAsync("visible").catch(() => {});
-        NavigationBar.setBackgroundColorAsync('white').catch(() => {}); 
       }
     };
     initApp();
@@ -101,7 +108,22 @@ export default function RootLayout() {
     });
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      console.log(response);
+      const data = response.notification.request.content.data;
+      
+      if (data) {
+        if (data.screen === 'notice' && data.id) {
+          router.push({
+            pathname: '/../notice/detail',
+            params: { id: data.id }
+          } as any);
+          
+        } else if (data.screen === 'community' && data.id) {
+          router.push(`/community/${data.id}` as any);
+          
+        } else if (data.screen === 'suggestion') {
+          router.push('/suggestion' as any);
+        }
+      }
     });
 
     return () => {
@@ -145,7 +167,8 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <AdminContext.Provider value={{ isAdmin, isMaster, setIsAdmin: updateAdminStatus, setIsMaster: updateAdminStatus, user, setUser: handleSetUser }}>
-        <StatusBar style="dark" translucent={true} />
+        {/* ✅ 수정: translucent 속성 제거 */}
+        <StatusBar style="dark" />
         
         <Stack
           screenOptions={{
@@ -184,13 +207,15 @@ async function registerForPushNotificationsAsync() {
     });
   }
   if (Device.isDevice) {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
+    const existingPermissions = await Notifications.getPermissionsAsync();
+    let finalStatus = existingPermissions.granted;
+
+    if (!finalStatus) {
+      const requestedPermissions = await Notifications.requestPermissionsAsync();
+      finalStatus = requestedPermissions.granted;
     }
-    if (finalStatus !== 'granted') return;
+
+    if (!finalStatus) return;
     
     token = (await Notifications.getExpoPushTokenAsync({
       projectId: Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId,

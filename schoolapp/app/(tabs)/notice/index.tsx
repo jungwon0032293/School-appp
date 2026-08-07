@@ -4,7 +4,7 @@ import {
   ActivityIndicator, Platform, useColorScheme, Alert
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from "expo-router/react-navigation";
 import { db, auth } from "../../../firebaseConfig"; 
 import { collection, query, orderBy, getDocs, doc, setDoc, deleteDoc, getDoc, serverTimestamp, where } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
@@ -154,14 +154,17 @@ export default function NoticeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      {/* 헤더 */}
       <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>공지사항</Text>
+        <View style={styles.headerLeft}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.navButton}>
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>공지사항</Text>
+        </View>
         
-        {/* ✅ 이동 버튼 컨테이너 추가 */}
         <View style={styles.headerRight}>
           <TouchableOpacity 
-            onPress={() => router.push("/notice/bookmark" as any)} // BookmarkNoticeScreen 경로에 맞춰 수정하세요
+            onPress={() => router.push("/notice/bookmark" as any)} 
             style={styles.bookmarkListBtn}
           >
             <Ionicons name="bookmarks-outline" size={22} color={theme.text} />
@@ -198,17 +201,19 @@ export default function NoticeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { 
-    paddingTop: Platform.OS === 'ios' ? 60 : 20, 
-    paddingHorizontal: 24, 
+    paddingTop: Platform.OS === 'ios' ? 55 : 15, 
+    paddingHorizontal: 20, 
     paddingBottom: 20,
     flexDirection: 'row', 
     justifyContent: 'space-between', 
     alignItems: 'center',
     borderBottomWidth: 1,
   },
-  headerTitle: { fontSize: 24, fontWeight: '800' },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 }, // ✅ 우측 정렬용
-  bookmarkListBtn: { padding: 8 }, // ✅ 북마크 목록 이동 버튼 스타일
+  headerLeft: { flexDirection: 'row', alignItems: 'center' },
+  navButton: { padding: 4, marginLeft: -8, marginRight: 6 },
+  headerTitle: { fontSize: 22, fontWeight: '800' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 12 }, 
+  bookmarkListBtn: { padding: 8 }, 
   writeBtn: { 
     backgroundColor: '#82A977', 
     paddingHorizontal: 16, 
