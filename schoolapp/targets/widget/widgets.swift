@@ -1,6 +1,26 @@
 import WidgetKit
 import SwiftUI
 
+// MARK: - 디자인 공통 스타일 정의
+
+struct WidgetDesign {
+    // 배경색 (다크모드/라이트모드 자동 대응)
+    static let backgroundColor = Color(UIColor.systemBackground)
+    
+    // 급식 위젯 테마 색상 (차분하고 세련된 올리브 그린)
+    static let mealAccent = Color(red: 0.38, green: 0.52, blue: 0.28)
+    
+    // 시간표 위젯 테마 색상 (부드러운 파스텔 인디고 블루)
+    static let timetableAccent = Color(red: 0.28, green: 0.45, blue: 0.72)
+    
+    // 본문 글자 색상 (가독성 높은 은은한 흑색)
+    static let bodyText = Color(UIColor.label).opacity(0.85)
+    
+    // 보조 안내 글자 색상
+    static let subText = Color(UIColor.secondaryLabel)
+}
+
+
 // MARK: - 1. 급식 위젯 (MealWidget)
 
 struct MealProvider: TimelineProvider {
@@ -37,20 +57,41 @@ struct MealWidgetEntryView: View {
     var entry: MealEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(entry.mealType)
-                .font(.system(size: family == .systemSmall ? 13 : 15, weight: .bold))
-                .foregroundColor(Color(red: 0.33, green: 0.42, blue: 0.18)) // #556B2F
+        VStack(alignment: .leading, spacing: 6) {
+            // 헤더 (아이콘 + 제목)
+            HStack(spacing: 5) {
+                Image(systemName: "fork.knife.circle.fill")
+                    .foregroundColor(WidgetDesign.mealAccent)
+                    .font(.system(size: family == .systemSmall ? 15 : 17))
+                
+                Text(entry.mealType)
+                    .font(.system(size: family == .systemSmall ? 13 : 15, weight: .bold))
+                    .foregroundColor(WidgetDesign.mealAccent)
+                
+                Spacer()
+            }
+            
+            Divider()
+                .background(WidgetDesign.mealAccent.opacity(0.2))
 
+            // 본문 (메뉴 리스트)
             if family == .systemSmall {
-                Text(entry.mealList.split(separator: "\n").first.map(String.init) ?? "")
-                    .font(.system(size: 12))
+                let firstLine = entry.mealList.split(separator: "\n").first.map(String.init) ?? "급식 정보 없음"
+                Text(firstLine)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(WidgetDesign.bodyText)
+                    .lineLimit(3)
             } else {
                 Text(entry.mealList)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(WidgetDesign.bodyText)
+                    .lineSpacing(3)
             }
+
+            Spacer(minLength: 0)
         }
-        .padding()
+        .padding(14)
+        .containerBackground(for: .widget) { WidgetDesign.backgroundColor }
     }
 }
 
@@ -87,7 +128,6 @@ struct TimetableProvider: TimelineProvider {
 
     func loadEntry() -> TimetableEntry {
         let defaults = UserDefaults(suiteName: "group.com.ymk.schoolapp")
-        // App에서 시간표 데이터를 가져옵니다. (필요시 키 이름을 맞춰주세요)
         let timetableInfo = defaults?.string(forKey: "timetable") ?? "시간표 정보 없음"
         return TimetableEntry(date: Date(), timetableInfo: timetableInfo)
     }
@@ -103,15 +143,33 @@ struct TimetableWidgetEntryView: View {
     var entry: TimetableEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("오늘의 시간표")
-                .font(.system(size: family == .systemSmall ? 13 : 15, weight: .bold))
-                .foregroundColor(.blue)
+        VStack(alignment: .leading, spacing: 6) {
+            // 헤더 (아이콘 + 제목)
+            HStack(spacing: 5) {
+                Image(systemName: "calendar.badge.clock")
+                    .foregroundColor(WidgetDesign.timetableAccent)
+                    .font(.system(size: family == .systemSmall ? 15 : 17))
+                
+                Text("오늘의 시간표")
+                    .font(.system(size: family == .systemSmall ? 13 : 15, weight: .bold))
+                    .foregroundColor(WidgetDesign.timetableAccent)
+                
+                Spacer()
+            }
+            
+            Divider()
+                .background(WidgetDesign.timetableAccent.opacity(0.2))
 
+            // 본문 (시간표 정보)
             Text(entry.timetableInfo)
-                .font(.system(size: 13))
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(WidgetDesign.bodyText)
+                .lineSpacing(family == .systemSmall ? 2 : 4)
+
+            Spacer(minLength: 0)
         }
-        .padding()
+        .padding(14)
+        .containerBackground(for: .widget) { WidgetDesign.backgroundColor }
     }
 }
 
@@ -127,6 +185,3 @@ struct TimetableWidget: Widget {
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
-
-
-// MARK: - 3. 위젯 번들 등록 (index.swift에서 쓸 수 있도록 두 위젯 묶음)
