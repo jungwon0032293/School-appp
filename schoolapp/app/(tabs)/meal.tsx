@@ -124,7 +124,7 @@ export default function MealScreen() {
 
       const dinnerText = (data?.dinner && data.dinner.length > 0)
         ? data.dinner.join(", ")
-        : "저녁 급식 정보가 없습니다.";
+        : "석식 정보가 없습니다.";
 
       // 통합 문자열 (이전 호환용)
       const combinedText = data?.dinner && data.dinner.length > 0
