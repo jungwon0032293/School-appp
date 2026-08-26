@@ -63,16 +63,27 @@ export default function AdminLogin() {
   };
 
   const getPushToken = async () => {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== 'granted') {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== 'granted') return null;
     try {
-      return (await Notifications.getExpoPushTokenAsync()).data;
-    } catch (e) { return null; }
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') {
+        console.log("⚠️ 푸시 알림 권한이 거부되어 토큰을 가져올 수 없습니다.");
+        return null;
+      }
+
+      const tokenData = await Notifications.getExpoPushTokenAsync();
+      console.log("✅ 발급된 Expo Push Token:", tokenData.data);
+      return tokenData.data;
+    } catch (e) {
+      console.error("❌ Expo Push Token 발급 오류:", e);
+      return null;
+    }
   };
 
   const notifyAdmins = async (newUserName: string) => {
@@ -95,10 +106,12 @@ export default function AdminLogin() {
 
       const tokens: string[] = [];
       adminSnap.forEach((doc) => {
-        if (doc.data().pushToken) tokens.push(doc.data().pushToken);
+        const token = doc.data().expoPushToken || doc.data().pushToken;
+        if (token) tokens.push(token);
       });
       masterSnap.forEach((doc) => {
-        if (doc.data().pushToken) tokens.push(doc.data().pushToken);
+        const token = doc.data().expoPushToken || doc.data().pushToken;
+        if (token) tokens.push(token);
       });
 
       const uniqueTokens = Array.from(new Set(tokens));
@@ -195,13 +208,16 @@ export default function AdminLogin() {
       );
 
       await setDoc(userRef, {
-        studentId: cleanStudentId, name: cleanName, password: cleanPassword,
+        studentId: cleanStudentId, 
+        name: cleanName, 
+        password: cleanPassword,
         idCardImage: `data:image/jpeg;base64,${manipResult.base64}`,
-        pushToken,
+        expoPushToken: pushToken || null,
+        pushToken: pushToken || null,
         role: isCouncil ? "admin_pending" : "user_pending",
         isApproved: false,
         createdAt: new Date().toISOString(),
-      });
+      }, { merge: true });
 
       await notifyAdmins(cleanName);
       Alert.alert("신청 완료", "학생회 확인 후 승인될 예정입니다!");
@@ -225,6 +241,7 @@ export default function AdminLogin() {
     try {
       const userRef = doc(db, "users", cleanStudentId);
       const userSnap = await getDoc(userRef);
+
       if (!userSnap.exists() || userSnap.data().password !== cleanPassword || userSnap.data().name !== cleanName) {
         setLoading(false);
         return Alert.alert("실패", "정보가 일치하지 않습니다.");
@@ -246,13 +263,20 @@ export default function AdminLogin() {
       }
 
       const currentPushToken = await getPushToken();
-      if (currentPushToken) {
-        await setDoc(userRef, { pushToken: currentPushToken }, { merge: true });
-      }
+      const existingData = userSnap.data();
 
-      const userInfo = { studentId: cleanStudentId, uid: cleanStudentId, name: userSnap.data().name, role: userSnap.data().role };
+      const validToken = currentPushToken || existingData.expoPushToken || existingData.pushToken || null;
+
+      await setDoc(userRef, {
+        name: cleanName,
+        expoPushToken: validToken,
+        pushToken: validToken,
+        lastLoginAt: new Date().toISOString()
+      }, { merge: true });
+
+      const userInfo = { studentId: cleanStudentId, uid: cleanStudentId, name: existingData.name, role: existingData.role };
       await AsyncStorage.setItem('userSession', JSON.stringify(userInfo));
-      if (userSnap.data().role === "admin") setIsAdmin(true);
+      if (existingData.role === "admin") setIsAdmin(true);
       setUser(userInfo);
       router.replace('/');
     } catch (e: any) {

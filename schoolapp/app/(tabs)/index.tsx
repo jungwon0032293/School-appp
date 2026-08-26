@@ -10,11 +10,12 @@ import PagerView from 'react-native-pager-view';
 import { db, auth } from "../../firebaseConfig";
 import { 
   doc, getDoc, collection, query, orderBy, getDocs, where, updateDoc,
-  writeBatch 
+  writeBatch, setDoc, arrayUnion, arrayRemove
 } from "firebase/firestore";
 import { useAdmin } from "../_layout";
 import { Ionicons } from '@expo/vector-icons'; 
 import AsyncStorage from '@react-native-async-storage/async-storage'; 
+import * as Notifications from 'expo-notifications';
 
 const { width } = Dimensions.get('window');
 
@@ -36,6 +37,39 @@ export default function HomeScreen() {
   const buttonColor = '#82A977';
 
   const pagerRef = useRef<PagerView>(null);
+
+  // 🔄 [다기기 지원 푸시 토큰 배열 갱신 함수]
+  const refreshUserPushToken = async (targetUid: string) => {
+    if (!targetUid) return;
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') return;
+
+      const tokenData = await Notifications.getExpoPushTokenAsync();
+      const currentToken = tokenData.data;
+
+      if (!currentToken) return;
+
+      // 🎯 arrayUnion을 이용해 기존 기기 토큰을 보존하고 현재 기기 토큰을 배열에 누적
+      const userRef = doc(db, "users", String(targetUid));
+      await setDoc(userRef, {
+        pushTokens: arrayUnion(currentToken), // 다기기 지원 토큰 배열
+        expoPushToken: currentToken,          // 하위 호환 단일 토큰 보존
+        lastTokenUpdatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      console.log(`✅ [다기기 토큰 등록 완료] UID(${targetUid}):`, currentToken);
+    } catch (error) {
+      console.log("⚠️ [메인 토큰 갱신 스킵/에러]:", error);
+    }
+  };
 
   useEffect(() => {
     if (loading || banners.length <= 1) return;
@@ -92,7 +126,14 @@ export default function HomeScreen() {
   const loadHomeData = async () => {
     setLoading(true);
     const todayDate = getKSTDate();
+    const activeUid = user?.uid || auth.currentUser?.uid;
+
     try {
+      // 로그인된 유저가 있을 경우 최신 토큰 자동 갱신 및 배열 동기화
+      if (activeUid) {
+        refreshUserPushToken(activeUid);
+      }
+
       const targetStudentId = user?.studentId;
       if (targetStudentId) {
         const userDocRef = doc(db, "users", targetStudentId);
@@ -127,14 +168,33 @@ export default function HomeScreen() {
     loadHomeData(); 
   }, [])); 
 
+  // 🚪 로그아웃 시 현재 기기 푸시 토큰을 배열에서만 안전하게 삭제
   const handleSignOut = () => {
     Alert.alert("로그아웃", "로그아웃 하시겠습니까?", [
       { text: "취소" },
-      { text: "확인", onPress: () => {
-        setUser(null); 
-        setIsAdmin(false);
-        Alert.alert("알림", "로그아웃 되었습니다.");
-      }}
+      { 
+        text: "확인", 
+        onPress: async () => {
+          try {
+            const activeUid = user?.uid || auth.currentUser?.uid;
+            if (activeUid) {
+              const tokenData = await Notifications.getExpoPushTokenAsync().catch(() => null);
+              if (tokenData?.data) {
+                const userRef = doc(db, "users", String(activeUid));
+                await updateDoc(userRef, {
+                  pushTokens: arrayRemove(tokenData.data)
+                }).catch(() => null);
+              }
+            }
+          } catch (e) {
+            console.log("로그아웃 토큰 삭제 스킵:", e);
+          } finally {
+            setUser(null); 
+            setIsAdmin(false);
+            Alert.alert("알림", "로그아웃 되었습니다.");
+          }
+        }
+      }
     ]);
   };
 

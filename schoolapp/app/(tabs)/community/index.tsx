@@ -43,7 +43,7 @@ export default function CommunityScreen() {
   const isDark = colorScheme === 'dark';
 
   const [posts, setPosts] = useState<Post[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState('전체');
   const [searchQuery, setSearchQuery] = useState('');
   const [categories, setCategories] = useState(['전체', '인기글', '북마크', '1학년', '2학년', '3학년', '자유']);
@@ -51,6 +51,11 @@ export default function CommunityScreen() {
   const [reportCount, setReportCount] = useState(0); 
   const [bookmarks, setBookmarks] = useState<string[]>([]); 
   const [hiddenPostIds, setHiddenPostIds] = useState<string[]>([]); 
+
+  // 스크롤 및 화면 복원 제어용 Ref
+  const flatListRef = useRef<FlatList>(null);
+  const scrollOffsetRef = useRef<number>(0);
+  const isReturningFromDetail = useRef<boolean>(false);
 
   const drawerTranslateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
 
@@ -165,14 +170,15 @@ export default function CommunityScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadPosts();
+      // 뒤로가기로 들어온 경우 전체 로딩 스피너를 다시 띄우지 않음
+      loadPosts(!isReturningFromDetail.current);
       checkReports();
       loadBookmarks(); 
     }, [selectedCategory, isMaster, hiddenPostIds]) 
   );
 
-  const loadPosts = async () => {
-    setLoading(true);
+  const loadPosts = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       let currentHiddenIds = [...hiddenPostIds];
       
@@ -282,7 +288,7 @@ export default function CommunityScreen() {
       { text: "취소", style: "cancel" },
       { text: "삭제", style: "destructive", onPress: async () => {
           await deleteDoc(doc(db, "posts", id));
-          loadPosts();
+          loadPosts(false);
       }}
     ]);
   };
@@ -304,18 +310,34 @@ export default function CommunityScreen() {
           const updatedCats = categories.filter(c => c !== catName);
           setCategories(updatedCats);
           await AsyncStorage.setItem('community_categories', JSON.stringify(updatedCats));
+          
+          // 카테고리 삭제 시 스크롤 초기화
+          scrollOffsetRef.current = 0;
+          isReturningFromDetail.current = false;
           setSelectedCategory('전체');
           toggleDrawer(false);
-          loadPosts();
+          loadPosts(true);
         } catch (e) { console.error(e); } finally { setLoading(false); }
       }}
     ]);
+  };
+
+  const handleSelectCategory = (cat: string) => {
+    scrollOffsetRef.current = 0;
+    isReturningFromDetail.current = false;
+    setSelectedCategory(cat);
+    toggleDrawer(false);
   };
 
   const filteredPosts = posts.filter(post => 
     post.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     post.content.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handlePostPress = (postId: string) => {
+    isReturningFromDetail.current = true;
+    router.push(`/community/${postId}` as any);
+  };
 
   const renderPost = ({ item }: { item: Post }) => {
     const displayAuthor = item.isAnonymous 
@@ -339,7 +361,7 @@ export default function CommunityScreen() {
           { backgroundColor: theme.card, borderColor: theme.border },
           isHiddenPost && { opacity: 0.5, borderStyle: 'dashed', borderColor: theme.red } 
         ]}
-        onPress={() => router.push(`/community/${item.id}` as any)}
+        onPress={() => handlePostPress(item.id)}
         onLongPress={() => handleDelete(item.id)}
       >
         <View style={styles.postHeader}>
@@ -422,7 +444,11 @@ export default function CommunityScreen() {
           placeholder="게시글 검색..."
           placeholderTextColor={theme.subText}
           value={searchQuery}
-          onChangeText={setSearchQuery}
+          onChangeText={(text) => {
+            scrollOffsetRef.current = 0;
+            isReturningFromDetail.current = false;
+            setSearchQuery(text);
+          }}
         />
       </View>
 
@@ -430,10 +456,26 @@ export default function CommunityScreen() {
         <ActivityIndicator size="large" color={theme.accent} style={{ flex: 1 }} />
       ) : (
         <FlatList 
+          ref={flatListRef}
           data={filteredPosts}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listPadding}
           renderItem={renderPost}
+          onScroll={(event) => {
+            // 사용자가 직접 스크롤할 때만 좌표 저장
+            scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+          }}
+          onContentSizeChange={() => {
+            // 상세 페이지에서 돌아왔을 때 정확한 높이가 잡힌 후 스크롤 복원
+            if (isReturningFromDetail.current && scrollOffsetRef.current > 0) {
+              flatListRef.current?.scrollToOffset({
+                offset: scrollOffsetRef.current,
+                animated: false
+              });
+              isReturningFromDetail.current = false; // 복원 완료 후 해제
+            }
+          }}
+          scrollEventThrottle={16}
           ListEmptyComponent={<Text style={styles.emptyText}>{selectedCategory === '북마크' ? "북마크한 게시글이 없습니다." : "게시글이 없습니다."}</Text>}
         />
       )}
@@ -460,7 +502,7 @@ export default function CommunityScreen() {
                   <TouchableOpacity 
                     key={cat} 
                     style={[styles.categoryItem, selectedCategory === cat && { backgroundColor: theme.accent }]}
-                    onPress={() => { setSelectedCategory(cat); toggleDrawer(false); }}
+                    onPress={() => handleSelectCategory(cat)}
                     onLongPress={() => isAdmin && handleDeleteCategory(cat)}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

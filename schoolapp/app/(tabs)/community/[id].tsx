@@ -15,6 +15,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { useAdmin } from "../../_layout";
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import * as Notifications from 'expo-notifications';
 
 interface Reply {
   id: string;
@@ -77,6 +78,40 @@ export default function PostDetailScreen() {
     yellow: '#FFD700',
     writerBg: isDark ? '#2C2C2E' : '#E8F5E9',
     writerText: '#82A977'
+  };
+
+  // 🔄 [다기기 지원 푸시 토큰 배열 갱신]
+  const refreshUserPushToken = async (uid: string) => {
+    if (!uid) return;
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') return;
+
+      const tokenData = await Notifications.getExpoPushTokenAsync();
+      const currentToken = tokenData.data;
+
+      if (!currentToken) return;
+
+      // arrayUnion을 사용하여 기존 토큰 목록 유지 및 신규 토큰 추가
+      const userRef = doc(db, "users", String(uid));
+      await setDoc(userRef, {
+        pushTokens: arrayUnion(currentToken), // 다기기 전송용 배열
+        expoPushToken: currentToken,          // 하위 호환 단일 토큰
+        pushToken: currentToken,
+        lastTokenUpdatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      console.log(`✅ [토큰 자동 갱신 완료] UID(${uid}):`, currentToken);
+    } catch (error) {
+      console.log("⚠️ 토큰 자동 갱신 중 스킵/에러:", error);
+    }
   };
 
   useEffect(() => {
@@ -282,6 +317,7 @@ export default function PostDetailScreen() {
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         setCurrentUser(firebaseUser);
+        refreshUserPushToken(firebaseUser.uid);
       } else {
         setCurrentUser(null);
         setIsLiked(false);
@@ -298,13 +334,14 @@ export default function PostDetailScreen() {
     if (!id) return;
     
     setLoading(true); 
-    const activeUid = currentUser?.uid || user?.uid || auth.currentUser?.uid;
-
+    const activeUid = user?.uid || currentUser?.uid || auth.currentUser?.uid;
+    
     let cleanUserNotis: (() => void) | undefined;
 
     if (activeUid) {
       checkLikeStatus(activeUid);
       checkBookmarkStatus(activeUid);
+      refreshUserPushToken(activeUid);
 
       const userRef = doc(db, "users", activeUid);
       cleanUserNotis = onSnapshot(userRef, (docSnap) => {
@@ -398,41 +435,25 @@ export default function PostDetailScreen() {
     } catch (e) { console.log("Bookmark check error"); }
   };
 
-  // 상세 로그 및 예외 처리가 포함된 푸시 알림 전송 함수
+  // 🔔 [다기기 배열 푸시 전송 지원 알림 생성 함수]
   const createNotification = async (type: 'like' | 'comment', targetUid: string, pushContent: string, isAnonymousAction: boolean) => {
-    console.log("ok");
     const myUid = currentUser?.uid || auth.currentUser?.uid || user?.uid;
     const senderDisplayName = isAnonymousAction ? "익명" : (user?.name || "사용자");
     
-    console.log("👉 [1] 푸시 발송 시도 - 수신자(작성자) UID:", targetUid, "/ 발신자 UID:", myUid);
-
-    if (!targetUid || String(targetUid) === String(myUid)) {
-      console.log("❌ 본인 글/댓글에 대한 자가 동작이거나 targetUid가 유효하지 않아 알림을 보내지 않습니다.");
-      return;
-    }
+    if (!targetUid || String(targetUid) === String(myUid)) return;
 
     try {
       const targetUserDoc = await getDoc(doc(db, "users", String(targetUid)));
-      if (!targetUserDoc.exists()) {
-        console.log("❌ Firestore에서 수신자 유저 문서를 찾을 수 없습니다.");
-        return;
-      }
+      if (!targetUserDoc.exists()) return;
 
       const targetData = targetUserDoc.data();
       
-      // 알림 수신 설정 옵션 확인
-      if (type === 'like' && targetData.settings?.likeNoti === false) {
-        console.log("❌ 수신자가 좋아요 알림을 꺼두었습니다.");
-        return;
-      }
-      if (type === 'comment' && targetData.settings?.commentNoti === false) {
-        console.log("❌ 수신자가 댓글 알림을 꺼두었습니다.");
-        return;
-      }
+      if (type === 'like' && targetData.settings?.likeNoti === false) return;
+      if (type === 'comment' && targetData.settings?.commentNoti === false) return;
 
-      const currentPostTitle = postRefState.current?.title || post?.title || "게시글";
+      const currentPostTitle = post?.title || postRefState.current?.title || "게시글";
 
-      // 1. In-App Notification (Firestore) 저장
+      // 1. In-App Notification 저장
       await addDoc(collection(db, "notifications"), {
         targetUid: String(targetUid), 
         type,
@@ -443,29 +464,37 @@ export default function PostDetailScreen() {
         isRead: false,
         createdAt: serverTimestamp(),
       });
-      console.log("✅ Firestore In-App 알림 생성 완료");
 
-      // 2. Expo Push Token 확인 및 전송
-      const pushToken = targetData.pushToken || targetData.expoPushToken;
-      console.log("👉 [2] 수신자 푸시 토큰:", pushToken);
-
-      if (!pushToken) {
-        console.log("❌ 상대방 유저 문서(users/{uid})에 pushToken/expoPushToken 필드가 없습니다.");
-        return;
+      // 2. 다기기 토큰 배열 추출 (pushTokens 우선, 없으면 하위 호환 필드)
+      let rawTokens: string[] = [];
+      if (Array.isArray(targetData.pushTokens) && targetData.pushTokens.length > 0) {
+        rawTokens = targetData.pushTokens;
+      } else if (targetData.expoPushToken) {
+        rawTokens = [targetData.expoPushToken];
+      } else if (targetData.pushToken) {
+        rawTokens = [targetData.pushToken];
       }
+
+      const validTokens = Array.from(new Set(rawTokens.filter(t => typeof t === 'string' && t.trim() !== '')));
+      if (validTokens.length === 0) return;
 
       const pushTitle = type === 'like' ? "❤️ 새로운 좋아요" : "💬 새로운 댓글";
       const pushBody = type === 'like' 
         ? `${senderDisplayName}님이 회원님의 글을 좋아합니다.` 
         : `${senderDisplayName}: ${pushContent}`;
 
-      const res = await axios.post('https://exp.host/--/api/v2/push/send', {
-        to: pushToken,
+      // 3. Expo Push API 동시 전송 배열 구성
+      const messages = validTokens.map(token => ({
+        to: token,
         sound: 'default',
         title: pushTitle,
         body: pushBody,
-        data: { screen: 'community', id: String(id) }, 
-      }, {
+        data: { screen: 'community', id: String(id) },
+        priority: 'high',
+        badge: 1,
+      }));
+
+      await axios.post('https://exp.host/--/api/v2/push/send', messages, {
         headers: {
           'Accept': 'application/json',
           'Accept-encoding': 'gzip, deflate',
@@ -473,10 +502,10 @@ export default function PostDetailScreen() {
         }
       });
 
-      console.log("👉 [3] Expo 푸시 서버 응답 결과:", res.data);
+      console.log(`✅ [푸시 알림 전송 성공] 대상: ${targetUid}, 토큰 개수: ${validTokens.length}`);
 
-    } catch (e) { 
-      console.error("❌ 알림 생성 및 푸시 발송 실패 에러:", e); 
+    } catch (e: any) { 
+      console.error("❌ 알림 전송 에러:", e?.response?.data || e.message || e); 
     }
   };
 
@@ -496,7 +525,7 @@ export default function PostDetailScreen() {
         await setDoc(likeRef, { createdAt: serverTimestamp() });
         await updateDoc(postRef, { likeCount: increment(1) });
         
-        const targetAuthorUid = postRefState.current?.authorUid || post?.authorUid;
+        const targetAuthorUid = post?.authorUid || postRefState.current?.authorUid;
         if (targetAuthorUid) {
           createNotification('like', targetAuthorUid, "게시글을 좋아합니다.", false);
         }
@@ -655,8 +684,9 @@ export default function PostDetailScreen() {
         return;
       }
 
-      if (post && post.authorUid) {
-        const postAuthorRef = doc(db, "users", post.authorUid);
+      const targetAuthorUid = post?.authorUid || postRefState.current?.authorUid;
+      if (targetAuthorUid) {
+        const postAuthorRef = doc(db, "users", targetAuthorUid);
         const postAuthorSnap = await getDoc(postAuthorRef);
         
         if (postAuthorSnap.exists()) {
@@ -693,7 +723,7 @@ export default function PostDetailScreen() {
       });
       await updateDoc(postRef, { commentCount: increment(1) });
       
-      const targetAuthorUid = postRefState.current?.authorUid || post?.authorUid;
+      const targetAuthorUid = post?.authorUid || postRefState.current?.authorUid;
       if (targetAuthorUid) {
         createNotification('comment', targetAuthorUid, textToComment, isAnonComment);
       }
@@ -738,7 +768,15 @@ export default function PostDetailScreen() {
       });
       await updateDoc(postRef, { commentCount: increment(1) });
       
-      createNotification('comment', commentAuthorUid, textToReply, isAnonReply);
+      const postAuthorUid = post?.authorUid || postRefState.current?.authorUid;
+
+      if (commentAuthorUid) {
+        createNotification('comment', commentAuthorUid, textToReply, isAnonReply);
+      }
+
+      if (postAuthorUid && String(postAuthorUid) !== String(commentAuthorUid)) {
+        createNotification('comment', postAuthorUid, textToReply, isAnonReply);
+      }
       
       setReplyInput('');
       setActiveReplyCommentId(null);

@@ -5,7 +5,6 @@ import { useRouter } from 'expo-router';
 import { db, auth } from "../../firebaseConfig";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { Ionicons } from '@expo/vector-icons'; 
-// ✅ 수정: 동작하지 않던 expo-widgets(updateSnapshot) 대신 @bacons/apple-targets 사용
 import { ExtensionStorage } from '@bacons/apple-targets';
 
 const widgetStorage = new ExtensionStorage('group.com.ymk.schoolapp');
@@ -51,10 +50,9 @@ export default function TimetableScreen() {
     loadInitialData(); 
   }, []);
 
-  // 하드코딩된 날짜 대신, 오늘 기준 이번 주 월~금 날짜를 YYYYMMDD로 동적 계산
   const getCurrentWeekDates = (): string[] => {
     const today = new Date();
-    const day = today.getDay(); // 0: 일, 1: 월, ..., 6: 토
+    const day = today.getDay();
     const diffToMonday = day === 0 ? 1 : day === 6 ? 2 : 1 - day;
 
     const monday = new Date(today);
@@ -72,27 +70,30 @@ export default function TimetableScreen() {
     return dates;
   };
 
-  // ✅ 수정: widgetStorage.set()으로 값 저장 후 ExtensionStorage.reloadWidget()으로 위젯 새로고침
+  // ✅ 핵심 수정: 위젯이 전체 그리드를 그릴 수 있도록 timetable JSON 객체를 그대로 저장합니다.
   const updateWidgetTimetable = (currentTable: TimetableData, currentGrade: string, currentClass: string) => {
     try {
       const dayIndex = new Date().getDay();
-      
       const targetDay = (dayIndex >= 1 && dayIndex <= 5) ? DAYS[dayIndex - 1] : '월';
       
+      // 기존 텍스트 형태의 오늘 시간표 (소형/중형 위젯용)
       const lines: string[] = [];
       PERIODS.forEach(period => {
         const cell = currentTable[`${targetDay}-${period}`];
         if (cell && cell.subject.trim()) {
-          const roomInfo = cell.room.trim() ? ` (${cell.room.trim()})` : '';
-          lines.push(`${period}교시: ${cell.subject.trim()}${roomInfo}`);
+          lines.push(`${period}교시: ${cell.subject.trim()}`);
         }
       });
 
       const resultString = lines.length > 0 ? lines.join('\n') : '오늘 등록된\n시간표가 없습니다.';
-      const headerTitle = currentGrade && currentClass ? `육민관고 ${currentGrade}-${currentClass}` : '오늘의 시간표';
+      const headerTitle = currentGrade && currentClass ? `육민관고 ${currentGrade}-${currentClass}` : '나의 시간표';
 
       widgetStorage.set('gradeClass', headerTitle);
       widgetStorage.set('timetableList', resultString);
+      
+      // 대형 위젯 그리드 렌더링용 JSON 데이터 전송
+      widgetStorage.set('timetableData', JSON.stringify(currentTable));
+      
       ExtensionStorage.reloadWidget();
     } catch (e) {
       console.error("위젯 업데이트 중 오류 발생:", e);

@@ -111,27 +111,35 @@ export default function MealScreen() {
     }
   };
 
-  // 🎯 수정된 위젯 데이터 전달 함수
+  // 🎯 급식 위젯 데이터 저장 처리 (작은 위젯: 중식 / 큰 위젯: 중식 + 석식)
   const updateWidgetData = (date: string, data: any) => {
-    if (!data) return;
-
     try {
-      const lunchText = data.lunch && data.lunch.length > 0 
-        ? data.lunch.join("\n") 
-        : "점심 급식 정보가 없습니다.";
-        
-      const dinnerText = data.dinner && data.dinner.length > 0 
-        ? `\n\n[석식]\n${data.dinner.join("\n")}` 
-        : "";
-
       const month = date.split('-')[1];
       const day = date.split('-')[2];
+      const titleText = `${parseInt(month)}월 ${parseInt(day)}일 급식`;
 
-      widgetStorage.set('mealType', `${parseInt(month)}월 ${parseInt(day)}일 급식`);
-      widgetStorage.set('mealList', `${lunchText}${dinnerText}`);
+      const lunchText = (data?.lunch && data.lunch.length > 0)
+        ? data.lunch.join(", ")
+        : "급식 정보가 없습니다.";
+
+      const dinnerText = (data?.dinner && data.dinner.length > 0)
+        ? data.dinner.join(", ")
+        : "저녁 급식 정보가 없습니다.";
+
+      // 통합 문자열 (이전 호환용)
+      const combinedText = data?.dinner && data.dinner.length > 0
+        ? `[점심]\n${lunchText}\n\n[저녁]\n${dinnerText}`
+        : `[점심]\n${lunchText}`;
+
+      // 위젯 공유 스토리지 저장
+      widgetStorage.set('mealType', titleText);
+      widgetStorage.set('mealLunch', lunchText);  // 작은 위젯 전용
+      widgetStorage.set('mealDinner', dinnerText); // 중간/큰 위젯 전용
+      widgetStorage.set('mealList', combinedText); // 전체 목록
+      
       ExtensionStorage.reloadWidget();
     } catch (e) {
-      console.error("위젯 업데이트 중 오류 발생:", e);
+      console.error("급식 위젯 저장 에러:", e);
     }
   };
 
